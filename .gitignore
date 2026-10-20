@@ -1,0 +1,7 @@
+node_modules/
+# Machine-local workflow state: do not commit the SQLite database.
+.factory/factory.db
+.factory/factory.db-wal
+.factory/factory.db-shm
+# Phase artifacts under .factory/changes/ MAY be committed if you want a durable
+# paper trail of requirements/specs/designs; see README ("Storage").
