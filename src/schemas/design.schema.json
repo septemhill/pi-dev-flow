@@ -1,0 +1,188 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pi-ai-factory.local/schemas/design.schema.json",
+  "title": "Design artifact (contract 1.0.0)",
+  "description": "Parsed representation of a design.md artifact.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "metadata",
+    "context",
+    "referencedArtifacts",
+    "repositoryFindings",
+    "architecture",
+    "componentResponsibilities",
+    "dataModel",
+    "interfaces",
+    "runtime",
+    "libraryChoices",
+    "security",
+    "errorHandling",
+    "testingStrategy",
+    "designDecisions",
+    "risks",
+    "openQuestions"
+  ],
+  "properties": {
+    "metadata": {
+      "$ref": "#/$defs/metadata"
+    },
+    "context": {
+      "$ref": "#/$defs/requiredText"
+    },
+    "referencedArtifacts": {
+      "$ref": "#/$defs/requiredText"
+    },
+    "repositoryFindings": {
+      "$ref": "#/$defs/requiredText"
+    },
+    "architecture": {
+      "$ref": "#/$defs/requiredText"
+    },
+    "componentResponsibilities": {
+      "$ref": "#/$defs/requiredText"
+    },
+    "dataModel": {
+      "$ref": "#/$defs/nullableText"
+    },
+    "interfaces": {
+      "$ref": "#/$defs/nullableText"
+    },
+    "runtime": {
+      "$ref": "#/$defs/nullableText"
+    },
+    "libraryChoices": {
+      "$ref": "#/$defs/nullableText"
+    },
+    "security": {
+      "$ref": "#/$defs/nullableText"
+    },
+    "errorHandling": {
+      "$ref": "#/$defs/nullableText"
+    },
+    "testingStrategy": {
+      "$ref": "#/$defs/requiredText"
+    },
+    "designDecisions": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Design decision records (### DES-###: statement).",
+      "items": {
+        "$ref": "#/$defs/designDecision"
+      }
+    },
+    "risks": {
+      "$ref": "#/$defs/nullableText"
+    },
+    "openQuestions": {
+      "$ref": "#/$defs/nullableText"
+    }
+  },
+  "$defs": {
+    "metadata": {
+      "type": "object",
+      "description": "Machine-identifiable provenance of this artifact revision.",
+      "additionalProperties": false,
+      "required": [
+        "artifactType",
+        "contractVersion",
+        "changeId",
+        "revision",
+        "status"
+      ],
+      "properties": {
+        "artifactType": {
+          "const": "design",
+          "description": "Must equal the contract's artifact type."
+        },
+        "contractVersion": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+          "description": "Semantic version of the artifact contract this document follows."
+        },
+        "changeId": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]*$",
+          "description": "The factory change id this artifact belongs to."
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Revision number the extension will record for this candidate."
+        },
+        "status": {
+          "enum": [
+            "draft",
+            "complete"
+          ],
+          "description": "complete only when the document is ready for validation and review."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Optional ISO-8601 timestamp of the last edit."
+        }
+      }
+    },
+    "requiredText": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Free-form section content; must not be empty."
+    },
+    "nullableText": {
+      "description": "Section content; null only when the documented not-applicable marker was used.",
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "designDecision": {
+      "type": "object",
+      "description": "One design decision (### DES-###: statement).",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "title",
+        "rationale",
+        "consequences",
+        "description"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^DES-[0-9]{3,}$",
+          "description": "Stable unique decision id."
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The decision statement."
+        },
+        "rationale": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Why this option wins."
+        },
+        "consequences": {
+          "type": "string",
+          "minLength": 1,
+          "description": "What this makes easier or harder."
+        },
+        "alternatives": {
+          "type": "string",
+          "description": "Optional: rejected alternatives and why."
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Detailed description of the decision."
+        }
+      }
+    }
+  }
+}

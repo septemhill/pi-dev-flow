@@ -1,0 +1,193 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pi-ai-factory.local/schemas/implementation-report.schema.json",
+  "title": "Implementation report artifact (contract 1.0.0)",
+  "description": "Parsed representation of an implementation-report.md artifact. Evidence must be real execution output, never fabricated.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "metadata",
+    "approvedTaskPlan",
+    "taskResults",
+    "modifiedFiles",
+    "commandsExecuted",
+    "testResults",
+    "deviations",
+    "knownLimitations",
+    "unresolvedIssues",
+    "evidenceReferences"
+  ],
+  "properties": {
+    "metadata": {
+      "$ref": "#/$defs/metadata"
+    },
+    "approvedTaskPlan": {
+      "type": "object",
+      "description": "The exact approved task-plan revision this implementation used.",
+      "additionalProperties": false,
+      "required": [
+        "revision",
+        "hash"
+      ],
+      "properties": {
+        "revision": {
+          "type": "string",
+          "pattern": "^[0-9]+$",
+          "description": "Revision number of the approved task-plan artifact."
+        },
+        "hash": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$",
+          "description": "Full sha256 of the approved task-plan artifact."
+        }
+      }
+    },
+    "taskResults": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 15,
+      "description": "One outcome record per planned task, same ids.",
+      "items": {
+        "$ref": "#/$defs/taskResult"
+      }
+    },
+    "modifiedFiles": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "description": "Changed files with one-line reasons."
+    },
+    "commandsExecuted": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "description": "Significant commands run, with outcomes."
+    },
+    "testResults": {
+      "$ref": "#/$defs/requiredText"
+    },
+    "deviations": {
+      "$ref": "#/$defs/nullableText"
+    },
+    "knownLimitations": {
+      "$ref": "#/$defs/nullableText"
+    },
+    "unresolvedIssues": {
+      "$ref": "#/$defs/nullableText"
+    },
+    "evidenceReferences": {
+      "$ref": "#/$defs/nullableText"
+    }
+  },
+  "$defs": {
+    "metadata": {
+      "type": "object",
+      "description": "Machine-identifiable provenance of this artifact revision.",
+      "additionalProperties": false,
+      "required": [
+        "artifactType",
+        "contractVersion",
+        "changeId",
+        "revision",
+        "status"
+      ],
+      "properties": {
+        "artifactType": {
+          "const": "implementation-report",
+          "description": "Must equal the contract's artifact type."
+        },
+        "contractVersion": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+          "description": "Semantic version of the artifact contract this document follows."
+        },
+        "changeId": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]*$",
+          "description": "The factory change id this artifact belongs to."
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Revision number the extension will record for this candidate."
+        },
+        "status": {
+          "enum": [
+            "draft",
+            "complete"
+          ],
+          "description": "complete only when the document is ready for validation and review."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Optional ISO-8601 timestamp of the last edit."
+        }
+      }
+    },
+    "requiredText": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Free-form section content; must not be empty."
+    },
+    "nullableText": {
+      "description": "Section content; null only when the documented not-applicable marker was used.",
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "taskResult": {
+      "type": "object",
+      "description": "The actual outcome of one planned task (### TASK-###: title).",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "title",
+        "status",
+        "evidence"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^TASK-[0-9]{3,}$",
+          "description": "Must be a task id from the approved plan."
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Task title from the approved plan."
+        },
+        "status": {
+          "enum": [
+            "COMPLETED",
+            "FAILED",
+            "BLOCKED",
+            "NOT_STARTED"
+          ],
+          "description": "Actual outcome; COMPLETED requires real evidence."
+        },
+        "evidence": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Command(s) run + key output proving the outcome; descriptive text for non-completed outcomes."
+        },
+        "description": {
+          "type": "string",
+          "description": "Optional narrative of what actually happened."
+        }
+      }
+    }
+  }
+}

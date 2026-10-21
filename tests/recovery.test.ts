@@ -67,7 +67,7 @@ test("11b. missing artifact file is an explicit error, not a silent re-run", asy
   assert.equal(w.current_phase, "spec");
   // completing any phase whose artifact vanished is refused explicitly
   engine.beginCurrentPhase();
-  writeChangeFile(root, changeId, "design.md", makeArtifact("design")); // wrong phase on purpose
+  writeChangeFile(root, changeId, "design.md", makeArtifact("design", engine)); // wrong phase on purpose
   assertThrowsWorkflowError(() => engine.completeCurrentPhase(), "MISSING_ARTIFACT");
   engine.close();
   cleanup(root);
@@ -134,7 +134,7 @@ test("resume never bypasses an approval gate", () => {
   engine.initChange("gate at resume");
   engine.beginCurrentPhase();
   engine.appendRequirement("pending review");
-  writeChangeFile(root, engine.requireActive().change_id, "requirement.md", makeArtifact("requirement"));
+  writeChangeFile(root, engine.requireActive().change_id, "requirement.md", makeArtifact("requirement", engine));
   engine.completeCurrentPhase();
   // AWAITING_APPROVAL: resume is a no-op, run is still refused.
   const r = engine.resume();

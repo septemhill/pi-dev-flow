@@ -8,7 +8,14 @@ exact artifact it reviews.
 
 > The LLM is never the authoritative source of workflow state. It can *propose* artifacts,
 > tasks, and check results through narrow tools; it **cannot** set workflow status, skip
-> phases, advance without approval, or approve its own output.
+> phases, advance without approval, approve its own output, or bypass artifact validation.
+
+Every phase artifact is **template-driven and schema-validated**: it must follow a pinned,
+versioned Markdown template, parse deterministically, and pass a four-layer validation
+pipeline (structure → JSON Schema → cross-artifact traceability → phase semantics) before it
+is recorded and offered for approval. An invalid candidate is rejected with an actionable
+diagnostic list, recorded nowhere, and the workflow does not move. Validation cannot be
+skipped, reconfigured, or extended from the conversation.
 
 ## The six phases
 
@@ -28,8 +35,50 @@ requirement → spec → design → task_planning → implementation → verific
 | 5 | implementation | `implementation-report.md` (+ per-task evidence)       | code matches plan, tasks DONE with evidence    |
 | 6 | verification   | `verification-report.md` (+ recorded checks)           | every required check PASSED                    |
 
-Each phase artifact must contain the required sections for its phase (enforced in code);
-`factory_phase_complete` fails with an actionable list of everything that is missing.
+Each phase produces one artifact that must conform to its **artifact contract** (below);
+`factory_phase_complete` runs the full validation pipeline and fails with an actionable list
+of every problem, so nothing invalid is ever recorded or put up for approval.
+
+## Artifact contracts & validation
+
+Every phase is bound in code (`src/artifacts/artifact-registry.ts`) to a pinned contract:
+a versioned Markdown **template** (`src/templates/<phase>.template.md`), a JSON Schema
+(draft 2020-12, `src/schemas/<phase>.schema.json`), and a parser version. The LLM is handed
+the exact template plus the rules it must satisfy, but it **cannot change any part of the
+contract** — the template, schema, parser, and validation rules are pinned in code, loaded
+from the extension's own directory, and fail closed: if a template or schema cannot be
+loaded, validation is refused (`CONTRACT_ERROR`) rather than skipped.
+
+### The four-layer pipeline (all layers always run)
+
+| Layer | What it checks | Enforced by |
+|---|---|---|
+| 1. **Structure** | The file parses as the pinned template: exact section names/order, `## Metadata` key-values, `### PREFIX-NNN: Title` records with allowed fields, not-applicable markers only where allowed, no unknown sections/fields, no duplicate ids, code fences never parsed as structure | `src/artifacts/markdown-parser.ts` |
+| 2. **Schema** | The parsed JSON document validates against the pinned JSON Schema (draft 2020-12, Ajv + ajv-formats, pinned in code): required metadata, enums, id formats, record field types, `additionalProperties: false` | `src/artifacts/schema-validator.ts` |
+| 3. **Traceability** | Every approved upstream artifact still exists on disk with exactly its recorded sha256 (tamper/staleness → `TRACE_UPSTREAM_MODIFIED`/`_MISSING`); every `REQ/FR/AC/DES` id mentioned anywhere in the document (outside code fences) resolves to a record in the pinned upstream artifact; ids are compared zero-padding-agnostically (`AC-1` ≡ `AC-001`); legacy upstreams are flagged (`TRACE_UPSTREAM_LEGACY`) | `src/artifacts/traceability-validator.ts` |
+| 4. **Semantics** | Phase rules against *persisted* state: metadata binding (change id, contract version, expected revision, `Status: complete`), requirement source citations, AC/requirement coverage, task plan ↔ recorded plan mirror (count, ids, titles), acyclic backward-only task dependencies, implementation task results ↔ recorded tasks with real evidence, verification checks ↔ recorded checks with recomputed verdict (never trusted from the document), pinned upstream revisions + sha256 | `src/artifacts/semantic-validator.ts` |
+
+A candidate with **any ERROR** is rejected: nothing is recorded, no approval is requested,
+and the full diagnostics (code, location, message, suggested fix) are returned to the model.
+Every validation run — pass or fail — is persisted to the `validation_results` table for
+audit. `/factory validate` re-runs the pipeline on the current phase's artifact with no side
+effects.
+
+### Deterministic & testable
+
+The entire pipeline is pure: `(candidate file, persisted workflow state) → result`. No pi
+runtime imports, no network, no randomness. The same candidate always yields the same result
+for the same workflow state, which is what makes the gate un-bypassable and the whole thing
+unit-testable without a pi session.
+
+### Legacy artifacts
+
+Artifacts recorded before template-driven validation existed have `contract = NULL` in the
+artifact registry. They are **marked, not trusted**: `/factory status` flags them as legacy,
+and while such an artifact is the upstream of a running phase, downstream validation fails
+with a single actionable `TRACE_UPSTREAM_LEGACY` error — re-run that phase to regenerate a
+conformant, re-approved artifact. Every artifact recorded now stores the pinned contract it
+was validated against.
 
 ## Install
 
@@ -71,6 +120,7 @@ Requires Node ≥ 22.5 (built-in `node:sqlite`).
 | `/factory resume` | Explicit recovery after a crash/failure. Reconciles persisted state, flags integrity problems, and only then allows the workflow to continue. Never bypasses an approval gate. |
 | `/factory tasks` | Show the implementation task plan and per-task evidence. |
 | `/factory changes` | List all changes and their state. |
+| `/factory validate` | Re-run the full four-layer artifact validation on the current phase's artifact and print the result. **No side effects** — it never records, advances, or requests approval. Handy to check a draft before calling `factory_phase_complete`. |
 
 ## Tools (LLM-callable, narrowly scoped)
 
@@ -80,7 +130,7 @@ Requires Node ≥ 22.5 (built-in `node:sqlite`).
 | `factory_set_task_plan` | task_planning (RUNNING) | Record 1–15 tasks, each with title, scope, references, verification. |
 | `factory_task_update` | implementation (RUNNING) | Move one task PENDING → IN_PROGRESS → DONE. DONE requires evidence. |
 | `factory_check_record` | verification (RUNNING) | Record one check: name, required, PASSED/FAILED/SKIPPED/MANUAL, output. |
-| `factory_phase_complete` | any (RUNNING) | Validate + record the phase artifact (sha256), create the approval request, pause at AWAITING_APPROVAL. |
+| `factory_phase_complete` | any (RUNNING) | Run the full artifact validation pipeline; only if it passes, record the phase artifact (sha256 + contract), create the approval request, and pause at AWAITING_APPROVAL. Any error → nothing recorded, diagnostics returned. |
 | `factory_report_failure` | any (RUNNING) | Mark execution FAILED with a reason. Requires `/factory resume` to continue. |
 
 There is deliberately **no** `factory_approve` tool and no tool that sets workflow status.
@@ -128,7 +178,11 @@ Everything lives under `<project>/.factory/`:
 ```
 
 * The **database is the single source of truth** for workflow status; artifacts are the
-  source of truth for content (re-hashed on every approval).
+  source of truth for content (re-hashed on every approval). Each recorded artifact row stores
+  the pinned **contract** (`templateId@templateVersion`) it was validated against — `NULL`
+  marks a legacy, pre-contract artifact. Every validation run is persisted to the
+  `validation_results` table (change, phase, candidate sha256, pass/fail, issue counts,
+  contract versions, full result JSON, timestamp) for audit.
 * A workflow mid-phase (`RUNNING`) that survives a crash is not silently skipped: `/factory
   resume` recovers it to the same phase and `/factory run` re-prompts it, explicitly flagged
   as a possibly-interrupted re-run.
@@ -143,7 +197,7 @@ Everything lives under `<project>/.factory/`:
 ```bash
 npm install
 npm run typecheck     # strict tsc --noEmit
-npm test              # node --test (24 tests: workflow, approval gates, recovery)
+npm test              # node --test (63 tests: workflow, approval, recovery, parser, schema, semantic, traceability, approval-validation, legacy)
 ```
 
 Live smoke test:
@@ -156,17 +210,29 @@ pi -p --extension /path/to/pi-ai-factory/index.ts "/factory init hello"
 ## Layout
 
 ```
-index.ts                     # extension entry: /factory command + 6 tools + widget
-src/engine.ts                # FactoryEngine — the only code that mutates workflow state
-src/workflow/phases.ts       # phase order, artifact files, required sections
-src/workflow/transitions.ts  # pure, total transition functions (the whole state machine)
-src/workflow/errors.ts       # typed WorkflowError + human-readable descriptions
-src/workflow/state.ts        # record types
-src/persistence/database.ts  # node:sqlite schema + transactional access
-src/artifacts/artifact-store.ts # path-safe artifact file I/O + sha256
+index.ts                          # extension entry: /factory command + 6 tools + widget
+src/engine.ts                     # FactoryEngine — the only code that mutates workflow state
+src/workflow/phases.ts            # phase order, artifact files
+src/workflow/transitions.ts       # pure, total transition functions (the whole state machine)
+src/workflow/errors.ts            # typed WorkflowError + human-readable descriptions
+src/workflow/state.ts             # record types
+src/persistence/database.ts       # node:sqlite schema + transactional access
+src/artifacts/artifact-registry.ts# pinned contracts: template id/version + schema id per phase
+src/artifacts/artifact-types.ts   # shared artifact/issue/record types
+src/artifacts/template-loader.ts  # load the pinned template for a contract
+src/artifacts/markdown-parser.ts  # 1. deterministic template → JSON parse
+src/artifacts/schema-validator.ts # 2. JSON Schema (draft 2020-12, Ajv) validation
+src/artifacts/traceability-validator.ts # 3. upstream integrity + cross-artifact id resolution
+src/artifacts/semantic-validator.ts     # 4. phase rules vs. persisted state
+src/artifacts/artifact-validator.ts     # pipeline orchestrator + result formatting
+src/artifacts/artifact-store.ts   # path-safe artifact file I/O + sha256
+src/templates/*.template.md       # the six pinned artifact templates
+src/schemas/*.schema.json         # the six pinned JSON Schemas (draft 2020-12)
 src/approvals/approval-manager.ts # approval preconditions (pending, hash-still-matches)
 src/execution/phase-executor.ts   # builds the per-phase LLM work order from persisted state
-src/commands/factory.ts      # /factory command handler
-prompts/*.md                 # the six phase instruction templates
-tests/*.test.ts              # workflow / approval / recovery test suites
+src/commands/factory.ts           # /factory command handler
+prompts/*.md                      # the six phase instruction templates
+tests/                           # test suites (workflow, approval, recovery, template-parser,
+                                  #   schema-validation, semantic-validation, traceability,
+                                  #   approval-validation, legacy) + shared fixtures
 ```

@@ -2,6 +2,7 @@ import { FactoryEngine } from "../engine.ts";
 import { describeError } from "../workflow/errors.ts";
 import { PHASES, PHASE_ARTIFACT_FILE, nextPhase } from "../workflow/phases.ts";
 import { buildPhasePrompt } from "../execution/phase-executor.ts";
+import { formatValidationResult } from "../artifacts/artifact-validator.ts";
 import type { WorkflowSnapshot } from "../workflow/state.ts";
 
 /**
@@ -16,6 +17,7 @@ import type { WorkflowSnapshot } from "../workflow/state.ts";
  *   /factory resume
  *   /factory tasks
  *   /factory changes
+ *   /factory validate
  *
  * `sendPhasePrompt` is the only pi-runtime hook (pi.sendUserMessage);
  * everything else is engine code and stays unit-testable.
@@ -76,6 +78,9 @@ export async function handleFactory(
         break;
       case "changes":
         doChanges(ctx, deps);
+        break;
+      case "validate":
+        doValidate(ctx, deps);
         break;
       default:
         show(ctx, [`Unknown subcommand "${sub}".`, ...usage()]);
@@ -224,6 +229,20 @@ function doChanges(ctx: CommandCtxLike, deps: FactoryDeps): void {
   );
 }
 
+function doValidate(ctx: CommandCtxLike, deps: FactoryDeps): void {
+  const engine = deps.engineFor(ctx.cwd);
+  const { phase, result, latest } = engine.validateActivePhase();
+  const w = engine.requireActive();
+  const header = [
+    `Validating change ${w.change_id} — phase "${phase}" artifact` +
+      ` (${result.templateId}@${result.templateVersion}, schema ${result.schemaId}, parser ${result.parserVersion})`,
+    `Candidate: sha256:${result.artifactHash.slice(0, 16)}… expected revision ${result.expectedRevision}` +
+      (latest ? ` (latest recorded revision ${latest.revision})` : " (no revision recorded yet)"),
+    "",
+  ];
+  show(ctx, [...header, formatValidationResult(result)]);
+}
+
 // ------------------------------------------------------------- rendering
 
 function usage(): string[] {
@@ -237,6 +256,7 @@ function usage(): string[] {
     "  /factory resume               verify integrity + recover FAILED/interrupted workflows",
     "  /factory tasks                show the task plan and progress",
     "  /factory changes              list all changes",
+    "  /factory validate             re-run the full artifact validation on the current phase's artifact",
   ];
 }
 
@@ -252,6 +272,15 @@ function renderStatus(s: WorkflowSnapshot): string[] {
   ];
   if (latest) {
     lines.push(`Artifact:  ${PHASE_ARTIFACT_FILE[w.current_phase]} rev ${latest.revision} sha256:${latest.hash.slice(0, 16)}…`);
+  }
+  const legacy = s.artifacts.filter((a) => a.contract === null);
+  if (legacy.length > 0) {
+    for (const a of legacy) {
+      lines.push(
+        `Legacy:    ${a.phase} rev ${a.revision} was recorded before template-driven validation (no pinned contract). ` +
+          "Its structure is not guaranteed; re-run that phase to regenerate a conforming artifact and re-approve it.",
+      );
+    }
   }
   if (s.pendingApproval) {
     lines.push(

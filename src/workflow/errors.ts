@@ -10,6 +10,7 @@ export type WorkflowErrorCode =
   | "NO_TASKS" // task plan is empty
   | "TASKS_INCOMPLETE" // implementation finished with unfinished tasks
   | "VERIFICATION_FAILED" // a required check failed or was not executed
+  | "CONTRACT_ERROR" // pinned template/schema/contract file is missing or uncompilable — fail closed
   | "PERSISTENCE_ERROR" // database or artifact store is unreadable/corrupted
   | "REASON_REQUIRED" // a mandatory argument (e.g. rejection reason) is empty
   | "DESCRIPTION_REQUIRED"; // /factory init without a description

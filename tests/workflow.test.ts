@@ -45,7 +45,7 @@ function pendingRequirementApproval(root: string): void {
   const engine = eng(root);
   engine.beginCurrentPhase();
   engine.appendRequirement("test requirement");
-  writeChangeFile(root, engine.requireActive().change_id, "requirement.md", makeArtifact("requirement"));
+  writeChangeFile(root, engine.requireActive().change_id, "requirement.md", makeArtifact("requirement", engine));
   engine.completeCurrentPhase();
 }
 
@@ -182,14 +182,15 @@ test("13. failed required verification checks prevent a successful verification 
   engine.beginCurrentPhase();
   engine.recordCheck("unit-tests", true, "FAILED", "3 tests failed: expected 200 got 500");
   engine.recordCheck("typecheck", true, "PASSED", "clean");
-  writeChangeFile(root, engine.requireActive().change_id, "verification-report.md", makeArtifact("verification"));
+  writeChangeFile(root, engine.requireActive().change_id, "verification-report.md", makeArtifact("verification", engine));
   const err = assertThrowsWorkflowError(() => engine.completeCurrentPhase(), "VERIFICATION_FAILED");
   assert.match(err.message, /unit-tests=FAILED/);
   const w = engine.requireActive();
   assert.equal(w.current_phase, "verification");
   assert.equal(w.status, "RUNNING");
-  // a required SKIPPED check also blocks
+  // a required SKIPPED check also blocks (artifact re-written to mirror it)
   engine.recordCheck("typecheck", true, "SKIPPED", "forgot to run it");
+  writeChangeFile(root, engine.requireActive().change_id, "verification-report.md", makeArtifact("verification", engine));
   assertThrowsWorkflowError(() => engine.completeCurrentPhase(), "VERIFICATION_FAILED");
   cleanup(root);
 });

@@ -6,8 +6,9 @@ You are executing the **implementation** phase of an extension-managed software 
 Execute the approved task plan in order, with evidence, without scope creep.
 
 ## How to work
-1. Read the approved artifacts (paths below) and the task plan. The task statuses
-   given below reflect persisted state — do not trust conversation memory.
+1. Read the approved artifacts (paths in your work order) and the persisted task
+   plan. The task statuses given in the work order reflect persisted state — do
+   not trust conversation memory.
 2. Execute tasks strictly in seq order. For each task:
    a. Inspect the current repository state before changing anything.
    b. Make incremental changes within the task's stated scope only.
@@ -16,13 +17,12 @@ Execute the approved task plan in order, with evidence, without scope creep.
       `evidence`: the exact command(s) run and their key output. A task without
       evidence cannot be completed.
 3. Do not start the next task until the previous one is DONE with evidence.
-4. Keep `.factory/changes/<change_id>/implementation-report.md` up to date with at
-   least these sections:
-   - `## Modified Files` — file list with one-line reasons.
-   - `## Commands Executed` — every significant command run.
-   - `## Results` — per-task outcomes (including test output summaries).
-   - `## Unresolved Problems` — anything left open. If none, write "None".
-5. If a required check fails and you cannot fix it within scope, stop and call
+4. `Approved Task Plan` in the report must pin the recorded plan revision and
+   the FULL sha256 of the approved task-plan artifact (copy it from your work
+   order or `/factory status`).
+5. `Task Results` must contain one record per planned task with the same id and
+   title, status COMPLETED, and the REAL recorded evidence (never fabricated).
+6. If a task fails or blocks and you cannot fix it within scope, stop and call
    `factory_report_failure` with a precise reason. Do not hide failures.
 
 ## Completion

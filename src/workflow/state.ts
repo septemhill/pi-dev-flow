@@ -37,6 +37,13 @@ export interface ArtifactRecord {
   path: string;
   /** sha256 of the artifact file content at this revision. */
   hash: string;
+  /**
+   * The pinned artifact contract this artifact was validated against,
+   * `templateId@templateVersion`. NULL for legacy artifacts recorded before
+   * template-driven validation existed — they are marked legacy and must be
+   * regenerated (re-validated) before they can be trusted as upstream.
+   */
+  contract: string | null;
   created_at: string;
 }
 

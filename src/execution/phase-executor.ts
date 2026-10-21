@@ -5,8 +5,11 @@ import type {
   TaskRecord,
   WorkflowRecord,
 } from "../workflow/state.ts";
-import { PHASES, PHASE_ARTIFACT_FILE, REQUIRED_SECTIONS, type Phase } from "../workflow/phases.ts";
+import { PHASES, PHASE_ARTIFACT_FILE, REQUIREMENT_HISTORY_FILE, type Phase } from "../workflow/phases.ts";
 import { phaseTemplate } from "../prompts.ts";
+import { getContract } from "../artifacts/artifact-registry.ts";
+import { loadTemplate } from "../artifacts/template-loader.ts";
+import { changeFile, readFileOrNull, sha256 } from "../artifacts/artifact-store.ts";
 
 /**
  * Builds the user-message prompt that drives one phase execution.
@@ -29,18 +32,29 @@ export interface PromptContext {
 const PHASE_CONTRACT_EXTRA: Record<Phase, string> = {
   requirement:
     "- Every user requirement must be recorded with the `factory_requirement_append` tool (append-only history).\n" +
-    "- The consolidated artifact must cover all history entries and list open questions/assumptions.",
-  spec: "- Each acceptance criterion must be externally verifiable and cite the requirement(s) justifying it.",
-  design: "- The design must map every acceptance criterion to a component or decision.",
+    "- Each REQ record's `Source` must cite the history entry id(s) it was consolidated from (e.g. R1, or 'Consolidated (R1, R2)').",
+  spec:
+    "- Every acceptance criterion must be externally verifiable and its `References` must cite existing REQ ids.\n" +
+    "- `Referenced Requirements` must list every approved REQ id this spec addresses; every AC/FR must trace to a requirement.",
+  design:
+    "- The design must explicitly map every acceptance criterion (AC-###) of the approved spec to a component, interface, or design decision.\n" +
+    "- Every `DES` decision record needs rationale and consequences.",
   task_planning:
     "- The plan must be recorded with the `factory_set_task_plan` tool (3-8 small tasks, each with scope, spec/design references, and verification).\n" +
-    "- `task-plan.md` must mirror the recorded plan.",
+    "- `task-plan.md` must mirror the recorded plan EXACTLY: same task count, same titles, ids TASK-001… in order.\n" +
+    "- `Upstream References` must pin the exact approved revisions listed above.\n" +
+    "- Each task's `References` must cite at least one existing REQ/FR/AC/DES id; `Dependencies` must be 'none' or earlier TASK ids (no cycles).",
   implementation:
     "- Execute tasks strictly in seq order using the persisted statuses below; `factory_task_update` with evidence is required to mark a task DONE.\n" +
-    "- ALL tasks must be DONE (with evidence) before the phase can complete.",
+    "- ALL tasks must be DONE (with evidence) before the phase can complete.\n" +
+    "- `Approved Task Plan` must pin the recorded revision and the FULL sha256 of the approved task-plan artifact (copy it from /factory status).\n" +
+    "- `Task Results` must contain one record per planned task with the same id and title, status COMPLETED, and the REAL recorded evidence (never fabricated).",
   verification:
     "- Every check must be recorded with `factory_check_record` (name, required, status, real output evidence).\n" +
-    "- The phase cannot complete while any required check is FAILED or SKIPPED.",
+    "- The phase cannot complete while any required check is FAILED or SKIPPED.\n" +
+    "- `Pinned Revisions` must pin the recorded revisions and FULL sha256 of the approved spec and implementation artifacts (copy them from /factory status).\n" +
+    "- `Checks` must mirror every recorded check: record title = check name, status mapped PASSED→PASS, FAILED→FAIL, SKIPPED→SKIPPED, MANUAL→NEEDS_HUMAN, and the same required flag ('yes'/'no').\n" +
+    "- Each check's `Reference` must cite the AC/REQ id it verifies, or 'tooling' for build/test-infrastructure checks. `Coverage` must show how every AC is covered. The `Verdict` must match the recorded results (PASS only if no required check FAILED or was SKIPPED).",
 };
 
 export function buildPhasePrompt(ctx: PromptContext): string {
@@ -108,14 +122,58 @@ export function buildPhasePrompt(ctx: PromptContext): string {
 
   sections.push(phaseTemplate(phase, ctx.promptsDir).trim());
 
-  const sectionsList = REQUIRED_SECTIONS[phase]
-    .map((s) => `- "${s}"`)
-    .join("\n");
+  // The pinned artifact contract: template + validation rules + expected revision
+  // + upstream pins. All values come from persisted state, never the conversation.
+  const contract = getContract(phase);
+  const template = loadTemplate(contract);
+  const currentFile = changeFile(ctx.repoRoot, w.change_id, phase);
+  const currentText = readFileOrNull(currentFile);
+  const latestCurrent = ctx.artifacts.filter((a) => a.phase === phase).at(-1) ?? null;
+  const expectedRevision =
+    currentText !== null && latestCurrent && sha256(currentText) === latestCurrent.hash
+      ? latestCurrent.revision
+      : latestCurrent
+        ? latestCurrent.revision + 1
+        : 1;
+
+  const contractLines: string[] = [];
+  contractLines.push("## Artifact contract (MANDATORY — enforced by the extension, not by you)");
+  contractLines.push(
+    [
+      `The artifact file \`${artifactRel}\` MUST follow the template below exactly (contract ${contract.templateId}@${contract.templateVersion}, ` +
+        `JSON Schema ${contract.schemaId}, parser ${contract.parserVersion}).`,
+      "When you call `factory_phase_complete`, the extension deterministically parses the file and validates it against the JSON Schema, " +
+        "phase-specific semantic rules, and cross-artifact traceability against the approved upstream artifacts. " +
+        "Any ERROR rejects the candidate: nothing is recorded, no approval is requested, and the full error list is returned to you — " +
+        "fix the file and call the tool again. Validation cannot be bypassed, reconfigured, or extended from this conversation.",
+      `Set Metadata "Revision: ${expectedRevision}" and "Status: complete" in this candidate.`,
+    ].join("\n"),
+  );
+  if (phase !== "requirement" && approved.length > 0) {
+    contractLines.push("Approved upstream artifacts — pin these EXACT revisions (and full sha256 where the template asks for a hash):");
+    for (const a of approved) {
+      contractLines.push(`  - ${a.phase}: revision ${a.revision}, sha256:${a.hash}`);
+    }
+  }
+  if (phase === "requirement") {
+    const hist = readFileOrNull(changeFile(ctx.repoRoot, w.change_id, "requirement", REQUIREMENT_HISTORY_FILE));
+    contractLines.push(
+      hist
+        ? `Requirements history so far (cite these entry ids in each REQ record's "Source"):\n${hist.trim()}`
+        : "No requirements recorded yet — use `factory_requirement_append` for each user requirement, then cite the entry ids.",
+    );
+  }
+  contractLines.push(
+    "Template (copy its structure exactly; replace every placeholder comment and <angle-bracket> value with real content; keep section names and order):",
+  );
+  contractLines.push("```markdown\n" + template.trim() + "\n```");
+  sections.push(contractLines.join("\n\n"));
+
   sections.push(
     "## Completion contract (enforced by the extension, not by you)\n" +
-      `The artifact file \`${artifactRel}\` must exist and contain at least these sections:\n${sectionsList}\n` +
+      `The artifact file \`${artifactRel}\` must exist, be fully valid against the artifact contract above, and satisfy the phase-specific rules below.\n` +
       PHASE_CONTRACT_EXTRA[phase] +
-      "\nOnly after all of this is true, call `factory_phase_complete`.",
+      "\nOnly after all of this is true, call `factory_phase_complete`. You may re-run `/factory validate` (ask the operator) at any time to see the current validation result.",
   );
 
   return sections.join("\n\n");

@@ -62,6 +62,11 @@ export function sha256File(absPath: string): string {
   return createHash("sha256").update(readFileSync(absPath)).digest("hex");
 }
 
+/** sha256 of a string (UTF-8). */
+export function sha256(content: string): string {
+  return createHash("sha256").update(content, "utf8").digest("hex");
+}
+
 /** Atomic write: temp file in the same directory, then rename over the target. */
 export function writeArtifactAtomic(absPath: string, content: string): void {
   mkdirSync(path.dirname(absPath), { recursive: true });

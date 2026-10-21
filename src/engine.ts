@@ -10,17 +10,21 @@ import {
   changeFile,
   dbPath as resolveDbPath,
   readFileOrNull,
+  sha256,
   sha256File,
 } from "./artifacts/artifact-store.ts";
+import { getContract } from "./artifacts/artifact-registry.ts";
+import { validateArtifact, formatValidationResult, errorIssues, warningIssues } from "./artifacts/artifact-validator.ts";
+import type { ArtifactValidationResult } from "./artifacts/artifact-types.ts";
+import type { PhaseContext, UpstreamArtifactRef } from "./artifacts/validation-context.ts";
 import {
   PHASES,
   PHASE_ARTIFACT_FILE,
   REQUIREMENT_HISTORY_FILE,
-  REQUIRED_SECTIONS,
   nextPhase,
   type Phase,
 } from "./workflow/phases.ts";
-import { WorkflowError, describeError } from "./workflow/errors.ts";
+import { WorkflowError, describeError, isWorkflowError } from "./workflow/errors.ts";
 import {
   beginPhase,
   completePhase,
@@ -67,6 +71,8 @@ export interface NewTaskInput {
 export class FactoryEngine {
   root: string;
   db: Database;
+  /** Result of the most recent full artifact validation (set by validatePhaseContract / validateActivePhase). */
+  private lastValidation: { phase: Phase; result: ArtifactValidationResult } | null = null;
 
   constructor(root: string) {
     this.root = root;
@@ -275,6 +281,9 @@ export class FactoryEngine {
       revision,
       path: path.join(".factory", "changes", w.change_id, PHASE_ARTIFACT_FILE[phase]),
       hash,
+      // The contract this candidate was just validated against — persisted so
+      // the artifact can be audited and legacy (pre-contract) rows stay NULL.
+      contract: `${getContract(phase).templateId}@${getContract(phase).templateVersion}`,
       created_at: at,
     };
     const approval: ApprovalRecord = {
@@ -290,6 +299,7 @@ export class FactoryEngine {
       created_at: at,
       resolved_at: null,
     };
+    const v = this.lastValidation;
     this.db.tx(() => {
       // Insert a new revision row only when the content actually changed
       // (same hash + same revision would violate the uniqueness constraint).
@@ -301,17 +311,119 @@ export class FactoryEngine {
       this.db.updateWorkflow(nw, w.revision);
       this.db.insertEvent(
         nw.id, w.change_id, phase, "PHASE_COMPLETED",
-        `${PHASE_ARTIFACT_FILE[phase]} revision ${revision} sha256:${hash.slice(0, 16)} → approval ${approvalId}`,
+        `${PHASE_ARTIFACT_FILE[phase]} revision ${revision} sha256:${hash.slice(0, 16)} → approval ${approvalId}` +
+          (v && v.phase === phase
+            ? `; validation PASSED (contract ${v.result.templateId}@${v.result.templateVersion}, ${warningIssues(v.result).length} warning(s))`
+            : ""),
         at,
       );
     });
     return { workflow: nw, approval, artifact };
   }
 
-  /** Structural + phase-specific validation. Throws WorkflowError with the full list of problems. */
+  /**
+   * Build the validation context from PERSISTED state only: the requirement
+   * history file, recorded tasks, recorded checks, and the approved upstream
+   * artifacts (recorded revision + hash + on-disk text). Never from memory.
+   */
+  buildPhaseContext(changeId: string, phase: Phase, expectedRevision: number): PhaseContext {
+    const historyFile = changeFile(this.root, changeId, phase, REQUIREMENT_HISTORY_FILE);
+    const historyText = readFileOrNull(historyFile);
+    const requirementHistory = (historyText ?? "").split("\n").filter((l) => /^\s*-\s*\[[^\]]*\]\s*\(R\d+\)/.test(l));
+    const historyIds = requirementHistory
+      .map((l) => /\(R(\d+)\)/.exec(l))
+      .filter((m): m is RegExpExecArray => m !== null)
+      .map((m) => Number(m[1]));
+    const upstream: UpstreamArtifactRef[] = [];
+    for (const p of PHASES) {
+      if (p === phase) break;
+      const row = this.db.latestArtifact(changeId, p);
+      if (!row) continue;
+      upstream.push({
+        phase: p,
+        revision: row.revision,
+        hash: row.hash,
+        text: readFileOrNull(changeFile(this.root, changeId, p)),
+        // Recorded before template-driven validation existed (pre-contract).
+        legacy: row.contract === null,
+      });
+    }
+    return {
+      changeId,
+      expectedRevision,
+      requirementHistory,
+      historyIds,
+      tasks: this.db.listTasks(changeId),
+      checks: this.db.listChecks(changeId),
+      upstream,
+    };
+  }
+
+  /**
+   * Run the full artifact validation pipeline for one candidate artifact and
+   * persist the result for audit. Throws CONTRACT_ERROR when the pinned
+   * template/schema cannot be loaded (fail closed — never skip validation).
+   */
+  runArtifactValidation(
+    changeId: string,
+    phase: Phase,
+    text: string,
+    hash: string,
+    expectedRevision: number,
+  ): ArtifactValidationResult {
+    const contract = getContract(phase);
+    const ctx = this.buildPhaseContext(changeId, phase, expectedRevision);
+    const upstreamRaw = new Map<Phase, string | null>();
+    for (const u of ctx.upstream) upstreamRaw.set(u.phase, u.text);
+    let result: ArtifactValidationResult;
+    try {
+      result = validateArtifact({ contract, rawText: text, ctx, artifactHash: hash, upstreamRaw });
+    } catch (e) {
+      if (isWorkflowError(e)) throw e;
+      throw new WorkflowError(
+        "CONTRACT_ERROR",
+        `Artifact validation could not run: ${describeError(e)} Refusing to record an unvalidated artifact — fix the installation (template/schema files) and retry.`,
+      );
+    }
+    this.db.saveValidationResult(changeId, phase, hash, {
+      valid: result.valid,
+      errorCount: errorIssues(result).length,
+      warningCount: warningIssues(result).length,
+      templateVersion: result.templateVersion,
+      schemaId: result.schemaId,
+      parserVersion: result.parserVersion,
+      resultJson: JSON.stringify(result),
+    });
+    return result;
+  }
+
+  /**
+   * Validate the active workflow's current-phase artifact (for /factory
+   * validate). Returns the full result instead of throwing on INVALID;
+   * still throws on missing artifact / contract errors.
+   */
+  validateActivePhase(): { phase: Phase; result: ArtifactValidationResult; latest: ArtifactRecord | null } {
+    const w = this.requireActive();
+    const phase = w.current_phase;
+    const file = changeFile(this.root, w.change_id, phase);
+    const text = readFileOrNull(file);
+    if (text === null) {
+      throw new WorkflowError(
+        "MISSING_ARTIFACT",
+        `No artifact file yet for phase "${phase}" (${path.relative(this.root, file)}). Run the phase first, then /factory validate.`,
+      );
+    }
+    const latest = this.db.latestArtifact(w.change_id, phase);
+    const hash = sha256(text);
+    const expectedRevision = latest && latest.hash === hash ? latest.revision : (latest ? latest.revision + 1 : 1);
+    const result = this.runArtifactValidation(w.change_id, phase, text, hash, expectedRevision);
+    this.lastValidation = { phase, result };
+    return { phase, result, latest };
+  }
+
+  /** Structural + semantic + schema + traceability + phase-specific validation. Throws WorkflowError with the full list of problems. */
   validatePhaseContract(phase: Phase): void {
     const w = this.requireActive();
-    const problems: string[] = [];
     const file = changeFile(this.root, w.change_id, phase);
     const text = readFileOrNull(file);
     if (text === null) {
@@ -320,12 +432,26 @@ export class FactoryEngine {
         `Phase artifact is missing: ${path.relative(this.root, file)}. Write it first, then call factory_phase_complete.`,
       );
     }
-    for (const section of REQUIRED_SECTIONS[phase]) {
-      if (!text.split("\n").some((l) => l.trim() === section || l.startsWith(section + " "))) {
-        problems.push(`missing section "${section}"`);
-      }
+
+    // The artifact must pass the full pinned-contract pipeline: deterministic
+    // parse + JSON Schema + cross-artifact traceability + phase semantics.
+    // The LLM cannot bypass, reconfigure, or extend this contract.
+    const latest = this.db.latestArtifact(w.change_id, phase);
+    const hash = sha256(text);
+    const expectedRevision = latest && latest.hash === hash ? latest.revision : (latest ? latest.revision + 1 : 1);
+    const result = this.runArtifactValidation(w.change_id, phase, text, hash, expectedRevision);
+    this.lastValidation = { phase, result };
+    if (!result.valid) {
+      throw new WorkflowError(
+        "INVALID_ARTIFACT",
+        `Phase "${phase}" artifact FAILED validation (${errorIssues(result).length} error(s), ${warningIssues(result).length} warning(s)). ` +
+          `The candidate was NOT recorded and NO approval was requested. Fix the file and call factory_phase_complete again.\n\n` +
+          formatValidationResult(result),
+      );
     }
 
+    // Phase-specific persisted-state invariants (kept from the MVP gate).
+    const problems: string[] = [];
     if (phase === "requirement") {
       const hist = readFileOrNull(changeFile(this.root, w.change_id, phase, REQUIREMENT_HISTORY_FILE));
       const entries = hist ? hist.split("\n").filter((l) => l.startsWith("- [")).length : 0;

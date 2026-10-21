@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS artifacts (
   revision INTEGER NOT NULL,
   path TEXT NOT NULL,
   hash TEXT NOT NULL,
+  contract TEXT,
   created_at TEXT NOT NULL,
   UNIQUE (change_id, phase, revision)
 );
@@ -86,6 +87,20 @@ CREATE TABLE IF NOT EXISTS checks (
   updated_at TEXT NOT NULL,
   PRIMARY KEY (change_id, name)
 );
+CREATE TABLE IF NOT EXISTS validation_results (
+  change_id TEXT NOT NULL,
+  phase TEXT NOT NULL,
+  candidate_hash TEXT NOT NULL,
+  valid INTEGER NOT NULL,
+  error_count INTEGER NOT NULL,
+  warning_count INTEGER NOT NULL,
+  template_version TEXT NOT NULL,
+  schema_id TEXT NOT NULL,
+  parser_version TEXT NOT NULL,
+  result_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (change_id, phase, candidate_hash)
+);
 `;
 
 function asPhase(v: string): Phase {
@@ -119,6 +134,7 @@ export class Database {
       this.db = new DatabaseSync(dbPath);
       this.db.exec("PRAGMA journal_mode = WAL;");
       this.db.exec(SCHEMA);
+      this.migrate();
       // Fail fast on a database that is not a database (corrupted/truncated file).
       this.db.prepare("SELECT count(*) FROM workflows").get();
     } catch (e) {
@@ -135,6 +151,20 @@ export class Database {
       this.db.close();
     } catch {
       /* already closed */
+    }
+  }
+
+  /**
+   * Additive, idempotent migrations for databases created before a column
+   * existed. Legacy rows keep NULL in newly-added columns; that NULL is the
+   * legacy marker ("recorded before template-driven validation").
+   */
+  private migrate(): void {
+    const cols = new Set<string>(
+      (this.db.prepare("PRAGMA table_info(artifacts)").all() as Array<{ name: string }>).map((c) => c.name),
+    );
+    if (!cols.has("contract")) {
+      this.db.exec("ALTER TABLE artifacts ADD COLUMN contract TEXT");
     }
   }
 
@@ -216,8 +246,8 @@ export class Database {
 
   insertArtifact(a: ArtifactRecord): void {
     this.db
-      .prepare("INSERT INTO artifacts (id, change_id, phase, revision, path, hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
-      .run(a.id, a.change_id, a.phase, a.revision, a.path, a.hash, a.created_at);
+      .prepare("INSERT INTO artifacts (id, change_id, phase, revision, path, hash, contract, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+      .run(a.id, a.change_id, a.phase, a.revision, a.path, a.hash, a.contract, a.created_at);
   }
 
   latestArtifact(changeId: string, phase: Phase): ArtifactRecord | null {
@@ -233,6 +263,7 @@ export class Database {
       revision: o.revision as number,
       path: o.path as string,
       hash: o.hash as string,
+      contract: (o.contract as string | null) ?? null,
       created_at: o.created_at as string,
     };
   }
@@ -246,6 +277,7 @@ export class Database {
       revision: o.revision as number,
       path: o.path as string,
       hash: o.hash as string,
+      contract: (o.contract as string | null) ?? null,
       created_at: o.created_at as string,
     }));
   }
@@ -402,5 +434,82 @@ export class Database {
       output: (o.output as string | null) ?? null,
       updated_at: o.updated_at as string,
     }));
+  }
+
+  saveValidationResult(
+    changeId: string,
+    phase: string,
+    candidateHash: string,
+    result: {
+      valid: boolean;
+      errorCount: number;
+      warningCount: number;
+      templateVersion: string;
+      schemaId: string;
+      parserVersion: string;
+      resultJson: string;
+    },
+  ): void {
+    this.db.prepare(
+      `INSERT INTO validation_results (change_id, phase, candidate_hash, valid, error_count, warning_count, template_version, schema_id, parser_version, result_json, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(change_id, phase, candidate_hash) DO UPDATE SET
+         valid = excluded.valid,
+         error_count = excluded.error_count,
+         warning_count = excluded.warning_count,
+         template_version = excluded.template_version,
+         schema_id = excluded.schema_id,
+         parser_version = excluded.parser_version,
+         result_json = excluded.result_json,
+         created_at = excluded.created_at`,
+    ).run(
+      changeId,
+      phase,
+      candidateHash,
+      result.valid ? 1 : 0,
+      result.errorCount,
+      result.warningCount,
+      result.templateVersion,
+      result.schemaId,
+      result.parserVersion,
+      result.resultJson,
+      new Date().toISOString(),
+    );
+  }
+
+  listValidationResults(changeId: string): Array<{
+    changeId: string;
+    phase: string;
+    candidateHash: string;
+    valid: boolean;
+    errorCount: number;
+    warningCount: number;
+    templateVersion: string;
+    schemaId: string;
+    parserVersion: string;
+    resultJson: string;
+    createdAt: string;
+  }> {
+    return this.db
+      .prepare(
+        `SELECT change_id AS changeId, phase, candidate_hash AS candidateHash, valid, error_count AS errorCount, warning_count AS warningCount,
+                template_version AS templateVersion, schema_id AS schemaId, parser_version AS parserVersion,
+                result_json AS resultJson, created_at AS createdAt
+         FROM validation_results WHERE change_id = ? ORDER BY created_at ASC`,
+      )
+      .all(changeId)
+      .map((r) => ({ ...(r as object), valid: Boolean((r as { valid: number }).valid) })) as Array<{
+      changeId: string;
+      phase: string;
+      candidateHash: string;
+      valid: boolean;
+      errorCount: number;
+      warningCount: number;
+      templateVersion: string;
+      schemaId: string;
+      parserVersion: string;
+      resultJson: string;
+      createdAt: string;
+    }>;
   }
 }

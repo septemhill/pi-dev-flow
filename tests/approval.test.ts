@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { appendFileSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import {
   assertThrowsWorkflowError,
@@ -9,6 +9,7 @@ import {
   makeArtifact,
   makeRoot,
   newEngine,
+  reviseRequirement,
   writeChangeFile,
   type Engine,
 } from "./helpers.ts";
@@ -20,7 +21,7 @@ function pendingRequirementApproval(engine: Engine): void {
     engine.root,
     engine.requireActive().change_id,
     "requirement.md",
-    makeArtifact("requirement"),
+    makeArtifact("requirement", engine),
   );
   engine.completeCurrentPhase();
 }
@@ -38,7 +39,7 @@ test("7. a revised artifact invalidates the old approval; a new review is requir
   const changeId = engine.requireActive().change_id;
 
   // User (or agent) modifies the artifact after the approval request exists.
-  appendFileSync(changeFile(root, changeId, "requirement.md"), "\n- late edit that was never reviewed\n");
+  reviseRequirement(engine, "- late edit that was never reviewed");
 
   // Approving the stale approval must fail and INVALidATE it — no state advance.
   const err = assertThrowsWorkflowError(() => engine.approve("oops"), "STALE_APPROVAL");
@@ -108,7 +109,7 @@ test("rejecting requires a reason; approval history is preserved", () => {
   engine.reject("too vague");
   // revise (with a real content change) + re-review
   engine.beginCurrentPhase();
-  appendFileSync(changeFile(root, engine.requireActive().change_id, "requirement.md"), "\n- clarified per feedback\n");
+  reviseRequirement(engine, "- clarified per feedback");
   engine.completeCurrentPhase();
   engine.approve("ok now");
   const changeId = engine.getWorkflow(engine.listWorkflows()[0].change_id)!.change_id;
