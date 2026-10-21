@@ -12,6 +12,7 @@ import type { UpstreamIds } from "./semantic-validator.ts";
  *  - Id resolution: every REQ/FR/AC/DES id mentioned in the document (any
  *    section, including free-form text) must exist in the pinned upstream
  *    documents. Ids are compared numerically so "AC-1" resolves to "AC-001".
+ *    An unresolvable mention is TRACE_UNKNOWN_ITEM (one report per id).
  */
 
 export function buildUpstreamIds(
@@ -135,9 +136,9 @@ export function traceabilityIssues(
         if (seen.has(norm)) continue;
         seen.set(norm, li + 1);
         issues.push(
-          mk(contract, "SEM_BAD_REF", "ERROR",
+          mk(contract, "TRACE_UNKNOWN_ITEM", "ERROR",
             `${norm} is referenced (line ${li + 1}) but does not exist in the approved ${upstreamPhase} artifact. References to upstream items must resolve.`,
-            { relatedId: norm, relatedArtifact: upstreamPhase, line: li + 1 }),
+            { relatedId: norm, relatedArtifact: upstreamPhase, line: li + 1, suggestedFix: `Cite an existing ${prefix}-### id from the approved ${upstreamPhase} artifact, or remove the reference.` }),
         );
       }
     }

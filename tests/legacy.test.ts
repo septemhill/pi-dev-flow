@@ -18,7 +18,7 @@ function markLegacy(engine: Engine, phase: string): void {
   engine.db.db.prepare("UPDATE artifacts SET contract = NULL WHERE change_id = ? AND phase = ?").run(engine.requireActive().change_id, phase);
 }
 
-test("a legacy upstream blocks downstream phases with one actionable error (no SEM_BAD_REF flood)", () => {
+test("a legacy upstream blocks downstream phases with one actionable error (no TRACE_UNKNOWN_ITEM flood)", () => {
   const root = makeRoot();
   const engine = newEngine(root);
   const w = engine.initChange("legacy upstream");
@@ -32,7 +32,7 @@ test("a legacy upstream blocks downstream phases with one actionable error (no S
   assert.match(err.message, /requirement/);
   assert.match(err.message, /Re-run the "requirement" phase/);
   // the single legacy error stands in for all per-reference checks
-  assert.ok(!err.message.includes("SEM_BAD_REF"), err.message);
+  assert.ok(!err.message.includes("TRACE_UNKNOWN_ITEM"), err.message);
   // nothing recorded, phase unchanged
   assert.equal(engine.db.latestArtifact(w.change_id, "spec"), null);
   assert.equal(engine.requireActive().current_phase, "spec");

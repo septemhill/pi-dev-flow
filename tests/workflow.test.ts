@@ -183,15 +183,18 @@ test("13. failed required verification checks prevent a successful verification 
   engine.recordCheck("unit-tests", true, "FAILED", "3 tests failed: expected 200 got 500");
   engine.recordCheck("typecheck", true, "PASSED", "clean");
   writeChangeFile(root, engine.requireActive().change_id, "verification-report.md", makeArtifact("verification", engine));
-  const err = assertThrowsWorkflowError(() => engine.completeCurrentPhase(), "VERIFICATION_FAILED");
-  assert.match(err.message, /unit-tests=FAILED/);
+  // the coverage gate (acceptance → verification) blocks the artifact: a FAILED
+  // required check can never count as successful verification (fail-closed)
+  const err = assertThrowsWorkflowError(() => engine.completeCurrentPhase(), "INVALID_ARTIFACT");
+  assert.match(err.message, /TRACE_REQUIRED_CHECK_FAILED/);
+  assert.match(err.message, /AC-001/);
   const w = engine.requireActive();
   assert.equal(w.current_phase, "verification");
   assert.equal(w.status, "RUNNING");
   // a required SKIPPED check also blocks (artifact re-written to mirror it)
   engine.recordCheck("typecheck", true, "SKIPPED", "forgot to run it");
   writeChangeFile(root, engine.requireActive().change_id, "verification-report.md", makeArtifact("verification", engine));
-  assertThrowsWorkflowError(() => engine.completeCurrentPhase(), "VERIFICATION_FAILED");
+  assertThrowsWorkflowError(() => engine.completeCurrentPhase(), "INVALID_ARTIFACT");
   cleanup(root);
 });
 

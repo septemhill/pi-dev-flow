@@ -6,6 +6,12 @@ import { schemaIssues } from "./schema-validator.ts";
 import { semanticIssues } from "./semantic-validator.ts";
 import { traceabilityIssues } from "./traceability-validator.ts";
 import type { PhaseContext } from "./validation-context.ts";
+import { extractTraceGraph, type GraphInput } from "../traceability/items.ts";
+import { assessCoverage } from "../traceability/coverage.ts";
+import { coverageIssues } from "../traceability/issues.ts";
+import { semanticReviewIssues } from "../traceability/semantic-review.ts";
+import { buildWaiverMapFromContext } from "../traceability/waivers.ts";
+import type { CoverageStage } from "../traceability/types.ts";
 
 /**
  * The artifact validation pipeline — the single choke point through which
@@ -13,12 +19,17 @@ import type { PhaseContext } from "./validation-context.ts";
  *
  *   1. STRUCTURE    — deterministic Markdown → JSON parse (markdown-parser)
  *   2. SCHEMA       — JSON Schema draft 2020-12 (Ajv, pinned in code)
- *   3. TRACEABILITY — upstream integrity + cross-artifact id resolution
+ *   3. TRACEABILITY — upstream integrity + explicit relationship contract
+ *                     (typed items + declared links) + stage coverage
  *   4. SEMANTICS    — phase rules + agreement with persisted extension state
  *
- * The result is deterministic for a given (artifact, workflow state). The
- * LLM has no tool that skips or reconfigures this pipeline; a candidate with
- * any ERROR is rejected with actionable diagnostics, never recorded.
+ * The traceability graph is DERIVED from the normalized, pinned artifacts
+ * (documented: the content-hashed artifact files are the single source of
+ * truth; nothing is stored separately). Coverage is computed per phase gate:
+ * spec → requirement coverage, design → spec coverage, task-planning →
+ * spec/design task coverage, verification → AC verification coverage.
+ * Uncovered MANDATORY items block the gate (fail closed); explicit waivers
+ * are applied on top and reported as WAIVED, never as success.
  */
 
 export interface ValidateInput {
@@ -58,8 +69,43 @@ export function validateArtifact(input: ValidateInput): ArtifactValidationResult
   const trace = traceabilityIssues(contract, rawText, ctx.upstream, upstreamByPhase);
   issues.push(...trace.issues);
 
-  // 4) Semantics (uses resolved upstream id sets)
-  issues.push(...semanticIssues(contract, parsed, ctx, trace.ids));
+  // 3b) Traceability graph: explicit relationship contract + stage coverage
+  const graphInputs: GraphInput[] = [];
+  for (const ref of ctx.upstream) {
+    const doc = upstreamByPhase.get(ref.phase);
+    if (!doc || ref.legacy) continue; // legacy upstream: flagged, ids untrusted
+    graphInputs.push({
+      phase: ref.phase,
+      artifactType: getContract(ref.phase).artifactType,
+      revision: ref.revision,
+      approved: true,
+      parsed: doc,
+    });
+  }
+  graphInputs.push({
+    phase: contract.phase,
+    artifactType: contract.artifactType,
+    revision: ctx.expectedRevision,
+    approved: false,
+    parsed,
+  });
+  const { graph, issues: graphIssues } = extractTraceGraph(ctx.changeId, graphInputs);
+  issues.push(...graphIssues);
+
+  // Stage coverage for THIS phase's gate (fail closed for mandatory items).
+  const gateStage = GATE_STAGE[contract.phase];
+  if (gateStage) {
+    const waivers = buildWaiverMapFromContext(ctx);
+    const report = assessCoverage({ graph, waivers, stages: [gateStage] });
+    issues.push(...coverageIssues(contract, report.assessments));
+    if (contract.phase === "spec" || contract.phase === "design") {
+      // Bounded semantic attestation, validated against the deterministic result.
+      issues.push(...semanticReviewIssues(contract, parsed, graph, report.assessments));
+    }
+  }
+
+  // 4) Semantics (phase rules + persisted-state agreement)
+  issues.push(...semanticIssues(contract, parsed, ctx));
 
   // Deduplicate identical diagnostics across layers
   const seen = new Set<string>();
@@ -91,6 +137,14 @@ export function validateArtifact(input: ValidateInput): ArtifactValidationResult
 export function errorIssues(result: ArtifactValidationResult): ValidationIssue[] {
   return result.issues.filter((i) => i.severity === "ERROR");
 }
+
+/** Which coverage stage each phase gate enforces (implementation is enforced via task-evidence semantics). */
+const GATE_STAGE: Partial<Record<Phase, CoverageStage>> = {
+  spec: "requirement_to_spec",
+  design: "spec_to_design",
+  task_planning: "spec_to_tasks",
+  verification: "acceptance_to_verification",
+};
 
 export function warningIssues(result: ArtifactValidationResult): ValidationIssue[] {
   return result.issues.filter((i) => i.severity !== "ERROR");

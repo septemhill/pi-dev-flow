@@ -55,14 +55,122 @@ loaded, validation is refused (`CONTRACT_ERROR`) rather than skipped.
 |---|---|---|
 | 1. **Structure** | The file parses as the pinned template: exact section names/order, `## Metadata` key-values, `### PREFIX-NNN: Title` records with allowed fields, not-applicable markers only where allowed, no unknown sections/fields, no duplicate ids, code fences never parsed as structure | `src/artifacts/markdown-parser.ts` |
 | 2. **Schema** | The parsed JSON document validates against the pinned JSON Schema (draft 2020-12, Ajv + ajv-formats, pinned in code): required metadata, enums, id formats, record field types, `additionalProperties: false` | `src/artifacts/schema-validator.ts` |
-| 3. **Traceability** | Every approved upstream artifact still exists on disk with exactly its recorded sha256 (tamper/staleness → `TRACE_UPSTREAM_MODIFIED`/`_MISSING`); every `REQ/FR/AC/DES` id mentioned anywhere in the document (outside code fences) resolves to a record in the pinned upstream artifact; ids are compared zero-padding-agnostically (`AC-1` ≡ `AC-001`); legacy upstreams are flagged (`TRACE_UPSTREAM_LEGACY`) | `src/artifacts/traceability-validator.ts` |
-| 4. **Semantics** | Phase rules against *persisted* state: metadata binding (change id, contract version, expected revision, `Status: complete`), requirement source citations, AC/requirement coverage, task plan ↔ recorded plan mirror (count, ids, titles), acyclic backward-only task dependencies, implementation task results ↔ recorded tasks with real evidence, verification checks ↔ recorded checks with recomputed verdict (never trusted from the document), pinned upstream revisions + sha256 | `src/artifacts/semantic-validator.ts` |
+| 3. **Traceability** | Upstream integrity + id resolution (see layer 3 of the table below) **and** the coverage gate: the traceability graph is extracted from the pinned artifacts, the deterministic coverage engine assesses the stage(s) this phase is responsible for, and every uncovered mandatory item blocks the phase (fail-closed). Waivers are explicit, auditable exceptions — never silent | `src/artifacts/traceability-validator.ts` + `src/traceability/*` |
+| 4. **Semantics** | Phase rules against *persisted* state: metadata binding (change id, contract version, expected revision, `Status: complete`), requirement source citations, task plan ↔ recorded plan mirror (count, ids, titles), acyclic backward-only task dependencies, implementation task results ↔ recorded tasks with real evidence, verification checks ↔ recorded checks with recomputed verdict (never trusted from the document), pinned upstream revisions + sha256 | `src/artifacts/semantic-validator.ts` |
 
 A candidate with **any ERROR** is rejected: nothing is recorded, no approval is requested,
 and the full diagnostics (code, location, message, suggested fix) are returned to the model.
 Every validation run — pass or fail — is persisted to the `validation_results` table for
 audit. `/factory validate` re-runs the pipeline on the current phase's artifact with no side
 effects.
+
+## Traceability & coverage
+
+Coverage is **explicit, deterministic, and fail-closed**. The extension never infers
+relationships from free text and never treats "referenced" as "covered": a reference proves
+only that a relationship was *declared*; whether the downstream item actually addresses the
+upstream obligation is a separate, explicitly-attested review (below). The traceability
+graph is **derived, not stored** — it is recomputed on every validation and report from the
+immutable, content-hashed artifact files, which remain the single source of truth.
+
+### The relationship contract (pinned in code)
+
+Links always point **downstream → upstream** (the later-phase item declares the link to the
+upstream obligation it addresses). Only these pairs exist (`src/traceability/relations.ts`);
+anything else is a `TRACE_INVALID_RELATION` error — the LLM cannot invent relationships:
+
+| Relation | Source → Target | Contributes to coverage stage |
+|---|---|---|
+| `SATISFIES` | FR / AC → REQ | requirement → spec |
+| `DERIVED_FROM` | AC → FR | — (spec-internal provenance) |
+| `REALIZES` | DES → FR / AC | spec → design |
+| `IMPLEMENTS` | TASK → REQ / FR / AC / DES | spec → tasks |
+| `VERIFIES` | CHK → REQ / FR / AC | acceptance → verification (needs real evidence) |
+| `DEPENDS_ON` | TASK → TASK | — (same-plan ordering only) |
+
+Each record field has a pinned projection of this contract (e.g. an FR may cite only `REQ`
+ids, a DES only `FR/AC`, a CHK only `REQ/FR/AC`). Citing a prefix a field may not cite is a
+hard error with a suggested fix. Ids compare zero-padding-agnostically (`AC-1` ≡ `AC-001`).
+
+### Coverage stages & states
+
+The deterministic coverage engine (`src/traceability/coverage.ts`) assesses exactly the
+stage(s) each phase gate is responsible for, using only validated graph data:
+
+| Stage (gate phase) | Item is covered ⇔ |
+|---|---|
+| requirement → spec *(spec)* | ≥ 1 `SATISFIES` link from an FR or AC. `MUST` requirements are mandatory; `SHOULD`/`COULD` gaps warn but do not block. |
+| spec → design *(design)* | ≥ 1 `REALIZES` link from a DES record. |
+| spec → tasks *(task_planning)* | ≥ 1 `IMPLEMENTS` link from a TASK. |
+| tasks → implementation *(implementation)* | the task's Task Result is `COMPLETED` **with evidence**. |
+| acceptance → verification *(verification)* | ≥ 1 `VERIFIES` link from a check with **PASS** status. FAILED ⇒ the item is `FAILED` (blocking). SKIPPED/absent ⇒ uncovered — a skipped mandatory check never counts as success. NEEDS_HUMAN-only ⇒ explicitly unresolved (`humanPending`), warned at approval, never promoted. |
+
+States: `UNCOVERED`, `PARTIAL`, `COVERED`, `VERIFIED`, `FAILED`, `WAIVED`. `VERIFIED`
+requires passing evidence, not just a link; artifact approval is never equated with
+successful implementation or verification; waived items **stay in the denominator** and are
+reported as waived — never silently excluded.
+
+### Bounded semantic coverage review
+
+Spec and design carry a `Coverage Review` section (`SR-###` records) where the model may
+*attest* that a declared relationship actually covers the upstream obligation. The extension
+validates every attestation deterministically: unknown ids, attested-but-undeclared links,
+stage mismatches, and `PARTIAL`/`NEEDS_REVIEW` without named missing obligations are errors
+or surfaced warnings. A `COVERED` attestation **never** overrides a missing reference —
+deterministic findings always win (`TRACE_SEMANTIC_CONFLICT`). An inconclusive attestation
+is surfaced at approval for a human; it is never auto-rejected, auto-accepted, or retried in
+an unbounded loop.
+
+### Waivers (explicit, auditable, reversible)
+
+An uncovered *mandatory* item can be waived per item × stage with a rationale — a recorded
+exception, **not** a coverage claim:
+
+```text
+/factory waive REQ-002 requirement_to_spec "Deferred to a follow-up change; user decision 2026-01-02"
+/factory revoke-waiver wv-<id>
+```
+
+* Only items that exist in the recorded traceability graph at that stage can be waived —
+  waivers cannot fabricate coverage for phantom ids or override already-covered items.
+* A waiver **pins the current revision of every recorded artifact**; any of them advancing
+  makes the waiver **STALE** — it stops applying and the gap blocks again.
+* The gate reports waived items as `WAIVED` (with `TRACE_WAIVER_ACTIVE`) and the approval
+  screen shows them; the workflow may proceed, but the audit trail distinguishes exception
+  from verification success everywhere, including `/factory traceability`.
+
+### Inspecting coverage
+
+```text
+/factory traceability
+```
+
+prints the deterministic report for the active change: recorded artifact revisions (with
+legacy markers), graph findings, per-stage coverage percentages and per-item states, and all
+waivers (active vs stale). It reads only recorded artifacts — it never invents links or
+status, and a green report means exactly what the gates enforced.
+
+### Traceability diagnostic codes
+
+| Code | Severity | Meaning |
+|---|---|---|
+| `TRACE_UPSTREAM_MISSING` / `TRACE_UPSTREAM_MODIFIED` | ERROR | a pinned upstream file is gone or changed on disk (tamper/staleness) |
+| `TRACE_UPSTREAM_LEGACY` | ERROR | an upstream artifact predates template-driven validation — re-run that phase (single actionable error, no per-id flood) |
+| `TRACE_STALE_UPSTREAM_REVISION` | ERROR | the document pins an older upstream revision than the recorded one |
+| `TRACE_UNKNOWN_ITEM` | ERROR | an id mentioned in the document does not exist in the pinned upstream documents |
+| `TRACE_INVALID_RELATION` | ERROR | a reference/attestation violates the relationship contract (endpoint, field, or stage) |
+| `TRACE_DUPLICATE_ITEM_ID` | ERROR | one id used for two different items (graph-level backstop; per-section duplicates are `STRUCT_DUPLICATE_RECORD_ID`) |
+| `TRACE_MISSING_SPEC_COVERAGE` | ERROR / WARNING | requirement not addressed by any FR/AC (MUST ⇒ error) |
+| `TRACE_MISSING_DESIGN_COVERAGE` | ERROR | FR/AC not realized by any design decision |
+| `TRACE_MISSING_TASK_COVERAGE` | ERROR | FR/AC not implemented by any task |
+| `TRACE_MISSING_IMPLEMENTATION_EVIDENCE` | ERROR | task without a COMPLETED result + evidence |
+| `TRACE_MISSING_VERIFICATION` | ERROR / WARNING | AC without a passing check (humanPending ⇒ warning) |
+| `TRACE_REQUIRED_CHECK_FAILED` | ERROR | a check that verifies an AC FAILED — verification cannot be successful |
+| `TRACE_WAIVER_ACTIVE` | INFO | an explicit waiver applies (auditable exception) |
+| `TRACE_REVIEW_UNKNOWN_ID` / `TRACE_REVIEW_STAGE_MISMATCH` | ERROR | coverage-review record cites unknown items or a wrong stage |
+| `TRACE_REVIEW_INCONSISTENT` | ERROR | `PARTIAL`/`NEEDS_REVIEW` without naming missing obligations |
+| `TRACE_SEMANTIC_CONFLICT` | ERROR | a `COVERED` attestation contradicts deterministic coverage (deterministic wins) |
+| `TRACE_SEMANTIC_REVIEW` | WARNING | `PARTIAL`/`NEEDS_REVIEW` attestation — human review at approval |
 
 ### Deterministic & testable
 
@@ -121,6 +229,9 @@ Requires Node ≥ 22.5 (built-in `node:sqlite`).
 | `/factory tasks` | Show the implementation task plan and per-task evidence. |
 | `/factory changes` | List all changes and their state. |
 | `/factory validate` | Re-run the full four-layer artifact validation on the current phase's artifact and print the result. **No side effects** — it never records, advances, or requests approval. Handy to check a draft before calling `factory_phase_complete`. |
+| `/factory traceability` | Print the deterministic coverage report: recorded revisions, per-stage coverage with per-item states, uncovered items, graph findings, waivers (active/stale), legacy markers. |
+| `/factory waive <item-id> <stage> <rationale…>` | Grant an explicit, auditable coverage waiver for one item at one stage (rationale ≥ 10 chars; item must exist in the recorded graph and not already be covered). Pins current artifact revisions — upstream changes STALE the waiver. |
+| `/factory revoke-waiver <waiver-id>` | Revoke an active waiver; the deterministic coverage assessment stands again immediately. |
 
 ## Tools (LLM-callable, narrowly scoped)
 
@@ -157,8 +268,10 @@ IDLE ──run──▶ RUNNING ──complete──▶ AWAITING_APPROVAL
   after the request, the approval is **INVALIDATED** (persisted, with an event) and must be
   re-requested. A stale approval can never advance the workflow.
 * Repeated approve/reject of an already-resolved approval is refused (`ILLEGAL_TRANSITION`).
-* A failed required check (FAILED or SKIPPED) blocks verification completion
-  (`VERIFICATION_FAILED`) — a "successful" verification is impossible on red checks.
+* A failed required check (FAILED or SKIPPED) blocks verification completion — the coverage
+gate reports `TRACE_REQUIRED_CHECK_FAILED` at the acceptance → verification stage (and a
+phase-invariant backstop raises `VERIFICATION_FAILED`), so a "successful" verification is
+impossible on red checks.
 * Every refused transition leaves persisted state **byte-identical** (no partial writes:
   all mutations happen in single SQLite transactions with optimistic revision checks).
 
@@ -168,7 +281,7 @@ Everything lives under `<project>/.factory/`:
 
 ```
 .factory/
-  factory.db                      # SQLite: workflows, artifacts, approvals, tasks, checks, review events
+  factory.db                      # SQLite: workflows, artifacts, approvals, tasks, checks, waivers, review events
   changes/<change-id>/
     requirement.md                # phase artifacts (the human-readable record)
     requirements-history.md       # append-only raw requirement statements
@@ -182,7 +295,9 @@ Everything lives under `<project>/.factory/`:
   the pinned **contract** (`templateId@templateVersion`) it was validated against — `NULL`
   marks a legacy, pre-contract artifact. Every validation run is persisted to the
   `validation_results` table (change, phase, candidate sha256, pass/fail, issue counts,
-  contract versions, full result JSON, timestamp) for audit.
+  contract versions, full result JSON, timestamp) for audit. Waivers live in the `waivers`
+table (item × stage, rationale, status, pinned revisions) — exactly one active waiver per
+item×stage; grants/revocations are audit events.
 * A workflow mid-phase (`RUNNING`) that survives a crash is not silently skipped: `/factory
   resume` recovers it to the same phase and `/factory run` re-prompts it, explicitly flagged
   as a possibly-interrupted re-run.
@@ -197,7 +312,7 @@ Everything lives under `<project>/.factory/`:
 ```bash
 npm install
 npm run typecheck     # strict tsc --noEmit
-npm test              # node --test (63 tests: workflow, approval, recovery, parser, schema, semantic, traceability, approval-validation, legacy)
+npm test              # node --test (96 tests: workflow, approval, recovery, parser, schema, semantic, traceability, coverage, approval-validation, legacy)
 ```
 
 Live smoke test:
@@ -225,6 +340,14 @@ src/artifacts/schema-validator.ts # 2. JSON Schema (draft 2020-12, Ajv) validati
 src/artifacts/traceability-validator.ts # 3. upstream integrity + cross-artifact id resolution
 src/artifacts/semantic-validator.ts     # 4. phase rules vs. persisted state
 src/artifacts/artifact-validator.ts     # pipeline orchestrator + result formatting
+src/traceability/types.ts               # trace item/link/graph + coverage state types
+src/traceability/relations.ts           # the relationship contract (pinned, validated)
+src/traceability/items.ts               # deterministic graph extraction from parsed artifacts
+src/traceability/coverage.ts            # the deterministic coverage engine (5 stages)
+src/traceability/issues.ts              # coverage → gate diagnostics mapping
+src/traceability/semantic-review.ts     # bounded semantic (model) review validation
+src/traceability/waivers.ts             # shared waiver resolution (gates and report agree)
+src/traceability/report.ts              # /factory traceability report (build + render)
 src/artifacts/artifact-store.ts   # path-safe artifact file I/O + sha256
 src/templates/*.template.md       # the six pinned artifact templates
 src/schemas/*.schema.json         # the six pinned JSON Schemas (draft 2020-12)
@@ -234,5 +357,5 @@ src/commands/factory.ts           # /factory command handler
 prompts/*.md                      # the six phase instruction templates
 tests/                           # test suites (workflow, approval, recovery, template-parser,
                                   #   schema-validation, semantic-validation, traceability,
-                                  #   approval-validation, legacy) + shared fixtures
+                                  #   coverage, approval-validation, legacy) + shared fixtures
 ```

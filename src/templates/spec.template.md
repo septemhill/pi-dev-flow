@@ -3,7 +3,7 @@
 ## Metadata
 
 - Artifact Type: spec
-- Contract Version: 1.0.0
+- Contract Version: 1.1.0
 - Change ID: <change-id>
 - Revision: 1
 - Status: draft
@@ -52,11 +52,32 @@ zero-padded. Add one record per functional requirement, or the single line
 
 ### AC-001: <short title>
 
-- References: <comma-separated requirement ids, e.g. REQ-001>
+- References: <comma-separated requirement ids and/or functional requirement ids, e.g. REQ-001, FR-001>
 - Verification: <the command, test, or observable check that will prove this>
 
 <The verifiable expected result — operational, not "works correctly". Keep AC
-ids unique and zero-padded (AC-001, AC-002, …).>
+ids unique and zero-padded (AC-001, AC-002, …). Every FR-### and AC-### must
+reference at least one REQ-### or FR-### — the extension uses these links as
+the requirement→spec coverage denominator.>
+
+## Coverage Review
+
+<!-- Bounded semantic review: for requirement→spec links you want to attest
+     that the downstream FR/AC actually addresses the upstream obligation
+     (not just that it was referenced). One record per attested link. When you
+     only rely on the deterministic reference checks, write exactly:
+     None identified
+     The extension validates every record; a "COVERED" status can never
+     override a missing reference. -->
+
+### SR-001: <downstream id> satisfies <upstream id>
+
+- Upstream: <REQ-###>
+- Downstream: <FR-### or AC-###>
+- Stage: requirement_to_spec
+- Status: <COVERED | PARTIAL | NEEDS_REVIEW>
+- Missing Obligations: <what the downstream item does NOT address, or "None identified">
+- Rationale: <why this relationship covers the upstream obligation>
 
 ## External Verification Contract
 

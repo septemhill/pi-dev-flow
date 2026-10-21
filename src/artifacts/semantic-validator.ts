@@ -1,25 +1,19 @@
 import type { ArtifactContract, ParsedDocument, ParsedRecord, ValidationIssue } from "./artifact-types.ts";
 import type { PhaseContext } from "./validation-context.ts";
 import { reportStatusForCheck } from "./validation-context.ts";
-import { normalizeId } from "./traceability-validator.ts";
 import type { Phase } from "../workflow/phases.ts";
-
-function mentionedIds(text: string, prefix: string): Set<string> {
-  const out = new Set<string>();
-  for (const m of text.matchAll(new RegExp(`\\b${prefix}-(\\d+)\\b`, "g"))) {
-    out.add(`${prefix}-${m[1]!.padStart(3, "0")}`);
-  }
-  return out;
-}
 
 /**
  * Phase-specific SEMANTIC validation layer: invariants that JSON Schema cannot
  * express — cross-field rules, agreement with persisted extension state (task
  * plan, checks, requirement history, approved upstream revisions). JSON Schema
- * checks field shape; this layer checks meaning. Reference RESOLUTION against
- * upstream documents lives in traceability-validator.ts.
+ * checks field shape; this layer checks meaning.
  *
- * All functions are pure: (contract, parsed, ctx, upstreamIds) → issues.
+ * Cross-artifact reference RESOLUTION and stage COVERAGE live in the
+ * traceability layer / coverage engine (artifact-validator steps 3 + 3b);
+ * they are deliberately not duplicated here.
+ *
+ * All functions are pure: (contract, parsed, ctx) → issues.
  */
 
 /** Id sets collected from the parsed upstream artifacts (see traceability-validator). */
@@ -34,34 +28,25 @@ export function semanticIssues(
   contract: ArtifactContract,
   parsed: ParsedDocument,
   ctx: PhaseContext,
-  ids: UpstreamIds,
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
   const md = (parsed.doc.metadata ?? null) as Record<string, unknown> | null;
   if (md) issues.push(...metadataIssues(contract, md, ctx));
-  // Upstream phases recorded before template-driven validation. Their ids are
-  // not guaranteed, and the traceability layer already reports one actionable
-  // TRACE_UPSTREAM_LEGACY error per such phase — so the per-reference
-  // resolution checks below are suppressed for those phases (no flood).
-  const legacyPhases = new Set(ctx.upstream.filter((u) => u.legacy).map((u) => u.phase));
   switch (contract.phase) {
     case "requirement":
       issues.push(...requirementSemantic(contract, parsed, ctx));
       break;
     case "spec":
-      issues.push(...specSemantic(contract, parsed, ids, legacyPhases));
-      break;
-    case "design":
-      issues.push(...designSemantic(contract, parsed, ids));
+      issues.push(...specSemantic(contract, parsed));
       break;
     case "task_planning":
-      issues.push(...taskPlanSemantic(contract, parsed, ctx, ids, legacyPhases));
+      issues.push(...taskPlanSemantic(contract, parsed, ctx));
       break;
     case "implementation":
       issues.push(...implementationSemantic(contract, parsed, ctx));
       break;
     case "verification":
-      issues.push(...verificationSemantic(contract, parsed, ctx, ids, legacyPhases));
+      issues.push(...verificationSemantic(contract, parsed, ctx));
       break;
   }
   return issues;
@@ -194,83 +179,31 @@ function refsFieldIds(value: string, prefix: string): string[] {
   return [...value.matchAll(new RegExp(`\\b${prefix}-(\\d+)\\b`, "g"))].map((m) => m[0]!);
 }
 
-function specSemantic(contract: ArtifactContract, parsed: ParsedDocument, ids: UpstreamIds, legacyPhases: ReadonlySet<Phase> = new Set()): ValidationIssue[] {
+function specSemantic(contract: ArtifactContract, parsed: ParsedDocument): ValidationIssue[] {
+  // Reference RESOLUTION and requirement→spec COVERAGE are enforced by the
+  // traceability layer (mention scan) and the coverage gate (S1) respectively.
+  // Here: each spec item must declare at least one upstream reference.
   const out: ValidationIssue[] = [];
-  const checkRefs = (rec: ParsedRecord, section: string, field: string) => {
-    const value = rec.fields[field] ?? "";
-    const mentioned = refsFieldIds(value, "REQ");
-    if (mentioned.length === 0) {
+  for (const r of recordOf(parsed, "Functional Requirements")) {
+    if (refsFieldIds(r.fields["References"] ?? "", "REQ").length === 0) {
       out.push(
-        v(contract, "SEM_MISSING_REF", `${rec.id} (${section}) must reference at least one requirement id (REQ-###) in "${field}".`, "ERROR", {
-          section,
-          relatedId: rec.id,
-          suggestedFix: "Cite the requirement(s) this item derives from.",
-        }),
-      );
-      return;
-    }
-    // A legacy upstream cannot have its ids trusted; the single
-    // TRACE_UPSTREAM_LEGACY error already covers it, so skip resolution.
-    if (legacyPhases.has("requirement")) return;
-    for (const id of mentioned) {
-      if (!ids.requirement.has(normalizeId(id))) {
-        out.push(
-          v(contract, "SEM_BAD_REF", `${rec.id} (${section}) references ${id}, which does not exist in the approved requirement artifact.`, "ERROR", {
-            section,
-            relatedId: id,
-            relatedArtifact: "requirement",
-          }),
-      );
-      }
-    }
-  };
-  for (const r of recordOf(parsed, "Acceptance Criteria")) checkRefs(r, "Acceptance Criteria", "References");
-  for (const r of recordOf(parsed, "Functional Requirements")) checkRefs(r, "Functional Requirements", "References");
-
-  const listed = parsed.sections["Referenced Requirements"]?.items ?? [];
-  if (!legacyPhases.has("requirement")) {
-    for (const item of listed) {
-      if (!ids.requirement.has(normalizeId(item))) {
-        out.push(
-          v(contract, "SEM_BAD_REF", `Referenced Requirements lists ${item}, which does not exist in the approved requirement artifact.`, "ERROR", {
-            section: "Referenced Requirements",
-            relatedId: item,
-            relatedArtifact: "requirement",
-          }),
-        );
-      }
-    }
-  }
-  for (const id of ids.requirement) {
-    if (!listed.includes(id)) {
-      out.push(
-        v(contract, "SEM_UNREFERENCED_REQ", `Approved requirement ${id} is not listed in Referenced Requirements and is not referenced by any acceptance criterion or functional requirement.`, "WARNING", {
-          section: "Referenced Requirements",
-          relatedId: id,
-          relatedArtifact: "requirement",
-          suggestedFix: "List it in Referenced Requirements (and map it to an AC), or note in Unresolved Questions why it is out of scope here.",
+        v(contract, "SEM_MISSING_REF", `${r.id} (Functional Requirements) must reference at least one requirement id (REQ-###) in "References".`, "ERROR", {
+          section: "Functional Requirements",
+          relatedId: r.id,
+          suggestedFix: "Cite the requirement(s) this functional requirement satisfies. Every MUST requirement must be cited by at least one FR or AC — the coverage gate blocks the phase otherwise.",
         }),
       );
     }
   }
-  return out;
-}
-
-function docText(parsed: ParsedDocument): string {
-  return JSON.stringify(parsed.doc);
-}
-
-function designSemantic(contract: ArtifactContract, parsed: ParsedDocument, ids: UpstreamIds): ValidationIssue[] {
-  const out: ValidationIssue[] = [];
-  const text = docText(parsed);
-  const mentionedAc = mentionedIds(text, "AC");
-  for (const ac of ids.acceptance) {
-    if (!mentionedAc.has(ac)) {
+  for (const r of recordOf(parsed, "Acceptance Criteria")) {
+    const value = r.fields["References"] ?? "";
+    const mentioned = new Set([...refsFieldIds(value, "REQ"), ...refsFieldIds(value, "FR")]);
+    if (mentioned.size === 0) {
       out.push(
-        v(contract, "SEM_UNCOVERED_AC", `Acceptance criterion ${ac} of the approved spec is not addressed anywhere in the design.`, "ERROR", {
-          relatedId: ac,
-          relatedArtifact: "spec",
-          suggestedFix: `Map ${ac} to a component, interface, or design decision (mention its id explicitly).`,
+        v(contract, "SEM_MISSING_REF", `${r.id} (Acceptance Criteria) must reference at least one requirement or functional requirement id (REQ-###/FR-###) in "References".`, "ERROR", {
+          section: "Acceptance Criteria",
+          relatedId: r.id,
+          suggestedFix: "Cite the requirement or functional requirement this criterion verifies.",
         }),
       );
     }
@@ -282,7 +215,7 @@ function upstreamRef(ctx: PhaseContext, phase: Phase): number | null {
   return ctx.upstream.find((u) => u.phase === phase)?.revision ?? null;
 }
 
-function taskPlanSemantic(contract: ArtifactContract, parsed: ParsedDocument, ctx: PhaseContext, ids: UpstreamIds, legacyPhases: ReadonlySet<Phase> = new Set()): ValidationIssue[] {
+function taskPlanSemantic(contract: ArtifactContract, parsed: ParsedDocument, ctx: PhaseContext): ValidationIssue[] {
   const out: ValidationIssue[] = [];
   const recs = recordOf(parsed, "Tasks");
 
@@ -367,7 +300,9 @@ function taskPlanSemantic(contract: ArtifactContract, parsed: ParsedDocument, ct
     }
   }
 
-  // References must resolve upstream.
+  // References must declare at least one upstream item; RESOLUTION is the
+  // traceability layer's job (mention scan) and TASK COVERAGE is enforced by
+  // the coverage gate (S3), so no per-id resolution happens here.
   for (const rec of recs) {
     const refs = rec.fields["References"] ?? "";
     const mentioned = [...refs.matchAll(/\b(REQ|FR|AC|DES)-(\d+)\b/g)].map((m) => m[0]!);
@@ -376,22 +311,9 @@ function taskPlanSemantic(contract: ArtifactContract, parsed: ParsedDocument, ct
         v(contract, "SEM_MISSING_REF", `Task ${rec.id} must reference at least one upstream item (REQ-###, FR-###, AC-### or DES-###) in "References".`, "ERROR", {
           section: "Tasks",
           relatedId: rec.id,
+          suggestedFix: "Cite the specification/design items this task implements. Every FR/AC must be cited by at least one task — the coverage gate blocks the phase otherwise.",
         }),
       );
-    }
-    for (const id of mentioned) {
-      const p = id.split("-")[0]!;
-      const upstreamPhase: Phase = p === "REQ" ? "requirement" : p === "DES" ? "design" : "spec";
-      if (legacyPhases.has(upstreamPhase)) continue;
-      const set = p === "REQ" ? ids.requirement : p === "FR" ? ids.functional : p === "AC" ? ids.acceptance : ids.design;
-      if (!set.has(normalizeId(id))) {
-        out.push(
-          v(contract, "SEM_BAD_REF", `Task ${rec.id} references ${id}, which does not exist in the approved upstream artifacts.`, "ERROR", {
-            section: "Tasks",
-            relatedId: id,
-          }),
-        );
-      }
     }
   }
 
@@ -408,7 +330,7 @@ function taskPlanSemantic(contract: ArtifactContract, parsed: ParsedDocument, ct
     if (want === null) continue;
     if (got !== undefined && got !== String(want)) {
       out.push(
-        v(contract, "SEM_STALE_REVISION", `Upstream References pins ${phase} at revision ${got}, but the approved revision is ${want}.`, "ERROR", {
+        v(contract, "TRACE_STALE_UPSTREAM_REVISION", `Upstream References pins ${phase} at revision ${got}, but the approved revision is ${want}.`, "ERROR", {
           section: "Upstream References",
           relatedArtifact: phase,
           suggestedFix: `Re-base the plan on revision ${want} of the ${phase} artifact (set "- ${key}: ${want}").`,
@@ -426,7 +348,7 @@ function implementationSemantic(contract: ArtifactContract, parsed: ParsedDocume
   if (plan) {
     if (kv["Revision"] !== undefined && kv["Revision"] !== String(plan.revision)) {
       out.push(
-        v(contract, "SEM_STALE_REVISION", `Approved Task Plan pins revision ${kv["Revision"]}, but the approved task-plan artifact is revision ${plan.revision}.`, "ERROR", {
+        v(contract, "TRACE_STALE_UPSTREAM_REVISION", `Approved Task Plan pins revision ${kv["Revision"]}, but the approved task-plan artifact is revision ${plan.revision}.`, "ERROR", {
           section: "Approved Task Plan",
           relatedArtifact: "task_planning",
           suggestedFix: `Implement against task-plan revision ${plan.revision} (set "- Revision: ${plan.revision}").`,
@@ -514,7 +436,7 @@ function implementationSemantic(contract: ArtifactContract, parsed: ParsedDocume
   return out;
 }
 
-function verificationSemantic(contract: ArtifactContract, parsed: ParsedDocument, ctx: PhaseContext, ids: UpstreamIds, legacyPhases: ReadonlySet<Phase> = new Set()): ValidationIssue[] {
+function verificationSemantic(contract: ArtifactContract, parsed: ParsedDocument, ctx: PhaseContext): ValidationIssue[] {
   const out: ValidationIssue[] = [];
   const specUp = ctx.upstream.find((u) => u.phase === "spec");
   const implUp = ctx.upstream.find((u) => u.phase === "implementation");
@@ -522,7 +444,7 @@ function verificationSemantic(contract: ArtifactContract, parsed: ParsedDocument
   if (specUp) {
     if (kv["Specification Revision"] !== undefined && kv["Specification Revision"] !== String(specUp.revision)) {
       out.push(
-        v(contract, "SEM_STALE_REVISION", `Pinned Revisions pins the specification at revision ${kv["Specification Revision"]}, but the approved spec is revision ${specUp.revision}.`, "ERROR", {
+        v(contract, "TRACE_STALE_UPSTREAM_REVISION", `Pinned Revisions pins the specification at revision ${kv["Specification Revision"]}, but the approved spec is revision ${specUp.revision}.`, "ERROR", {
           section: "Pinned Revisions",
           relatedArtifact: "spec",
         }),
@@ -541,7 +463,7 @@ function verificationSemantic(contract: ArtifactContract, parsed: ParsedDocument
   if (implUp) {
     if (kv["Implementation Revision"] !== undefined && kv["Implementation Revision"] !== String(implUp.revision)) {
       out.push(
-        v(contract, "SEM_STALE_REVISION", `Pinned Revisions pins the implementation at revision ${kv["Implementation Revision"]}, but the approved implementation-report is revision ${implUp.revision}.`, "ERROR", {
+        v(contract, "TRACE_STALE_UPSTREAM_REVISION", `Pinned Revisions pins the implementation at revision ${kv["Implementation Revision"]}, but the approved implementation-report is revision ${implUp.revision}.`, "ERROR", {
           section: "Pinned Revisions",
           relatedArtifact: "implementation",
         }),
@@ -608,41 +530,16 @@ function verificationSemantic(contract: ArtifactContract, parsed: ParsedDocument
           v(contract, "SEM_MISSING_REF", `Check ${rec.id} must reference an acceptance criterion or requirement id (or "tooling" for build/test-infrastructure checks).`, "ERROR", {
             section: "Checks",
             relatedId: rec.id,
+            suggestedFix: "Cite the AC/REQ/FR this check verifies. Every AC must be cited by at least one check — the coverage gate blocks the phase otherwise.",
           }),
         );
-      }
-      for (const id of mentioned) {
-        const p = id.split("-")[0]!;
-        const upstreamPhase: Phase = p === "REQ" ? "requirement" : "spec";
-        if (legacyPhases.has(upstreamPhase)) continue;
-        const set = p === "REQ" ? ids.requirement : p === "FR" ? ids.functional : ids.acceptance;
-        if (!set.has(normalizeId(id))) {
-          out.push(
-            v(contract, "SEM_BAD_REF", `Check ${rec.id} references ${id}, which does not exist in the approved upstream artifacts.`, "ERROR", {
-              section: "Checks",
-              relatedId: id,
-            }),
-          );
-        }
       }
     }
   }
 
-  // Coverage: every acceptance criterion is covered by a check or the coverage text.
-  const coverageText = (parsed.sections["Coverage"]?.text ?? "") + " " + recs.map((r) => r.fields["Reference"] ?? "").join(" ");
-  const covered = mentionedIds(coverageText, "AC");
-  for (const ac of ids.acceptance) {
-    if (!covered.has(ac)) {
-      out.push(
-        v(contract, "SEM_UNCOVERED_AC", `Acceptance criterion ${ac} is not covered by any check and not mentioned in Coverage.`, "ERROR", {
-          section: "Coverage",
-          relatedId: ac,
-          relatedArtifact: "spec",
-          suggestedFix: `Add a check referencing ${ac}, or list it in Coverage with an explicit reason.`,
-        }),
-      );
-    }
-  }
+  // AC verification COVERAGE (S5) is enforced by the coverage gate, which
+  // additionally distinguishes PASS / FAIL / SKIPPED / NEEDS_HUMAN evidence
+  // (a skipped or failed check never counts as verification).
 
   // Verdict: recomputed from recorded results, never trusted.
   const blocking = ctx.checks.filter((c) => c.required && (c.status === "FAILED" || c.status === "SKIPPED"));

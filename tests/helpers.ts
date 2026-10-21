@@ -52,10 +52,13 @@ function expectedRevision(engine: Engine, phase: Phase): number {
 
 function metadataBlock(engine: Engine, phase: Phase, artifactType: string, rev: number): string {
   const w = engine.requireActive();
+  // Per-contract versions: spec and design are at 1.1.0 (DES References +
+  // Coverage Review), all others at 1.0.0.
+  const version = phase === "spec" || phase === "design" ? "1.1.0" : "1.0.0";
   return [
     "## Metadata",
     `- Artifact Type: ${artifactType}`,
-    "- Contract Version: 1.0.0",
+    `- Contract Version: ${version}`,
     `- Change ID: ${w.change_id}`,
     `- Revision: ${rev}`,
     "- Status: complete",
@@ -158,6 +161,9 @@ function specDoc(engine: Engine): string {
     "",
     "Running the tool performs the requested behavior.",
     "",
+    "## Coverage Review",
+    "None identified",
+    "",
     "## External Verification Contract",
     "- The unit-tests check covers AC-001; the typecheck check covers the build.",
     "",
@@ -216,11 +222,15 @@ function designDoc(engine: Engine): string {
     "",
     "### DES-001: Implement as a single module",
     "",
+    "- References: FR-001, AC-001",
     "- Rationale: The simplest structure that satisfies AC-001.",
     "- Consequences: Easy to test; harder to scale later.",
     "- Alternatives: Multi-module split, rejected as overkill.",
     "",
     "The single module keeps the change small and reviewable.",
+    "",
+    "## Coverage Review",
+    "None identified",
     "",
     "## Risks",
     "None identified",
@@ -475,8 +485,8 @@ export function completePhase(root: string, engine: Engine, phase: Phase): void 
     case "task_planning":
       engine.setTaskPlan(
         [
-          { title: "Add feature", scope: "src/feature.ts", references: "AC-1, D1", verification: "npm test" },
-          { title: "Wire it up", scope: "src/index.ts", references: "AC-1, D2", verification: "manual smoke test" },
+          { title: "Add feature", scope: "src/feature.ts", references: "FR-1, AC-1", verification: "npm test" },
+          { title: "Wire it up", scope: "src/index.ts", references: "FR-1, AC-1", verification: "manual smoke test" },
         ],
         false,
       );

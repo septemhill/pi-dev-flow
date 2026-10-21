@@ -20,7 +20,7 @@ test("semantic: metadata is immutable by the model (type, version, change id, re
   const badType = runValidation("spec", base.replace("- Artifact Type: spec", "- Artifact Type: requirement"));
   assert.ok(codes(badType).includes("SEM_BAD_ARTIFACT_TYPE"));
 
-  const badVersion = runValidation("spec", base.replace("- Contract Version: 1.0.0", "- Contract Version: 2.0.0"));
+  const badVersion = runValidation("spec", base.replace("- Contract Version: 1.1.0", "- Contract Version: 2.0.0"));
   assert.ok(codes(badVersion).includes("SEM_CONTRACT_VERSION_MISMATCH"));
 
   const badChange = runValidation("spec", base.replace("- Change ID: chg-fixture", "- Change ID: chg-other"));
@@ -52,13 +52,12 @@ test("semantic: requirement sources must cite real history entries", () => {
 });
 
 test("semantic: the design must address every acceptance criterion", () => {
-  const blind = DESIGN_DOC
-    .replace("Requirement REQ-001 and acceptance criterion AC-001 of the approved spec.", "The approved spec.")
-    .replace("Unit tests cover AC-001; the typecheck check covers the build.", "Unit tests cover the spec; the typecheck check covers the build.")
-    .replace("- Rationale: The simplest structure that satisfies AC-001.", "- Rationale: The simplest structure that satisfies the spec.");
-  assert.ok(!blind.includes("AC-001"), "test setup: AC-001 must be fully removed");
+  // the design decision no longer realizes AC-001 → stage S2 coverage gap
+  const blind = DESIGN_DOC.replace("- References: FR-001, AC-001", "- References: FR-001");
   const result = runValidation("design", blind);
-  assert.ok(codes(result).includes("SEM_UNCOVERED_AC"), codes(result).join(","));
+  assert.ok(codes(result).includes("TRACE_MISSING_DESIGN_COVERAGE"), codes(result).join(","));
+  const hit = result.issues.find((i) => i.code === "TRACE_MISSING_DESIGN_COVERAGE" && i.relatedId === "AC-001");
+  assert.ok(hit, "the uncovered AC must be named in the diagnostic");
 });
 
 test("semantic: the task plan must mirror the recorded plan exactly", () => {

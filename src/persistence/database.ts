@@ -9,6 +9,7 @@ import type {
   CheckRecord,
   EventRecord,
   TaskRecord,
+  WaiverRecord,
   WorkflowRecord,
 } from "../workflow/state.ts";
 import { isPhase, type Phase } from "../workflow/phases.ts";
@@ -101,6 +102,17 @@ CREATE TABLE IF NOT EXISTS validation_results (
   created_at TEXT NOT NULL,
   PRIMARY KEY (change_id, phase, candidate_hash)
 );
+CREATE TABLE IF NOT EXISTS waivers (
+  id TEXT PRIMARY KEY,
+  change_id TEXT NOT NULL,
+  item_id TEXT NOT NULL,
+  stage TEXT NOT NULL,
+  rationale TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'ACTIVE',
+  pinned_revisions TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL,
+  UNIQUE (change_id, item_id, stage, id)
+);
 `;
 
 function asPhase(v: string): Phase {
@@ -108,6 +120,19 @@ function asPhase(v: string): Phase {
     throw new WorkflowError("PERSISTENCE_ERROR", `Corrupted workflow state: unknown phase "${v}".`);
   }
   return v;
+}
+
+function mapWaiver(r: Record<string, unknown>): WaiverRecord {
+  return {
+    id: r.id as string,
+    change_id: r.change_id as string,
+    item_id: r.item_id as string,
+    stage: r.stage as WaiverRecord["stage"],
+    rationale: r.rationale as string,
+    status: r.status as WaiverRecord["status"],
+    pinned_revisions: (r.pinned_revisions as string) ?? "{}",
+    created_at: r.created_at as string,
+  };
 }
 
 function mapWorkflow(r: Record<string, unknown>): WorkflowRecord {
@@ -511,5 +536,43 @@ export class Database {
       resultJson: string;
       createdAt: string;
     }>;
+  }
+
+  // ---- waivers ----
+
+  /**
+   * Grant a coverage waiver. Exactly one ACTIVE waiver per (item, stage);
+   * re-granting returns the existing one (idempotent) unless a different
+   * rationale is forced, in which case the old one is revoked and replaced.
+   */
+  addWaiver(w: WaiverRecord): { waiver: WaiverRecord; created: boolean } {
+    const existing = this.db
+      .prepare("SELECT * FROM waivers WHERE change_id = ? AND item_id = ? AND stage = ? AND status = 'ACTIVE'")
+      .get(w.change_id, w.item_id, w.stage);
+    if (existing) {
+      return { waiver: mapWaiver(existing as Record<string, unknown>), created: false };
+    }
+    this.db
+      .prepare(
+        `INSERT INTO waivers (id, change_id, item_id, stage, rationale, status, pinned_revisions, created_at)
+         VALUES (?, ?, ?, ?, ?, 'ACTIVE', ?, ?)`,
+      )
+      .run(w.id, w.change_id, w.item_id, w.stage, w.rationale, w.pinned_revisions, w.created_at);
+    return { waiver: w, created: true };
+  }
+
+  revokeWaiver(id: string): boolean {
+    const r = this.db.prepare("UPDATE waivers SET status = 'REVOKED' WHERE id = ? AND status = 'ACTIVE'").run(id);
+    return (r.changes ?? 0) === 1;
+  }
+
+  listWaivers(changeId: string): WaiverRecord[] {
+    const rows = this.db.prepare("SELECT * FROM waivers WHERE change_id = ? ORDER BY created_at ASC, id ASC").all(changeId);
+    return (rows as Record<string, unknown>[]).map(mapWaiver);
+  }
+
+  getWaiver(id: string): WaiverRecord | null {
+    const r = this.db.prepare("SELECT * FROM waivers WHERE id = ?").get(id);
+    return r ? mapWaiver(r as Record<string, unknown>) : null;
   }
 }

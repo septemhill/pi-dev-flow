@@ -5,7 +5,7 @@ import { readFileSync, existsSync } from "node:fs";
 import path from "node:path";
 import { WorkflowError } from "../workflow/errors.ts";
 import { extensionDir } from "../prompts.ts";
-import { SCHEMA_DRAFT, SCHEMA_VERSION } from "./artifact-registry.ts";
+import { SCHEMA_DRAFT } from "./artifact-registry.ts";
 import type { ArtifactContract, ValidationIssue } from "./artifact-types.ts";
 
 /**

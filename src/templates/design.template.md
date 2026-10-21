@@ -3,7 +3,7 @@
 ## Metadata
 
 - Artifact Type: design
-- Contract Version: 1.0.0
+- Contract Version: 1.1.0
 - Change ID: <change-id>
 - Revision: 1
 - Status: draft
@@ -68,11 +68,32 @@
 
 ### DES-001: <decision statement>
 
+- References: <FR-###/AC-### ids this decision realizes, or "None identified" — cite only FR/AC ids>
 - Rationale: <why this option wins>
 - Consequences: <what this makes easier or harder>
 - Alternatives: <what was rejected and why — optional>
 
-<Keep DES ids unique and zero-padded. Every important decision gets a record.>
+<Keep DES ids unique and zero-padded. Every important decision gets a record.
+Every FR-### and AC-### of the approved spec must be cited by at least one
+DES record above — that is how the extension proves design coverage.>
+
+## Coverage Review
+
+<!-- Bounded semantic review: for links you want to attest that the downstream
+     item actually addresses the upstream obligation (not just that it was
+     referenced). One record per attested link. When you only rely on the
+     deterministic reference checks, write exactly: None identified
+     The extension validates every record; a "COVERED" status can never
+     override a missing reference. -->
+
+### SR-001: <downstream id> realizes <upstream id>
+
+- Upstream: <FR-### or AC-###>
+- Downstream: <DES-###>
+- Stage: spec_to_design
+- Status: <COVERED | PARTIAL | NEEDS_REVIEW>
+- Missing Obligations: <what the downstream item does NOT address, or "None identified">
+- Rationale: <why this relationship covers the upstream obligation>
 
 ## Risks
 

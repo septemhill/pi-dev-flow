@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://pi-ai-factory.local/schemas/spec.schema.json",
-  "title": "Specification artifact (contract 1.0.0)",
+  "title": "Specification artifact (contract 1.1.0)",
   "description": "Parsed representation of a spec.md artifact.",
   "type": "object",
   "additionalProperties": false,
@@ -16,6 +16,7 @@
     "errorBehavior",
     "boundaryConditions",
     "acceptanceCriteria",
+    "coverageReview",
     "verificationContract",
     "unresolvedQuestions"
   ],
@@ -75,6 +76,9 @@
     },
     "verificationContract": {
       "$ref": "#/$defs/requiredText"
+    },
+    "coverageReview": {
+      "$ref": "#/$defs/coverageReview"
     },
     "nonFunctionalRequirements": {
       "$ref": "#/$defs/nullableText"
@@ -204,7 +208,7 @@
         "references": {
           "type": "string",
           "minLength": 1,
-          "description": "Comma-separated requirement ids justifying this criterion."
+          "description": "Comma-separated requirement ids justifying this criterion (REQ-### and/or FR-###)."
         },
         "verification": {
           "type": "string",
@@ -215,6 +219,85 @@
           "type": "string",
           "minLength": 1,
           "description": "The verifiable expected result."
+        }
+      }
+    },
+    "coverageReview": {
+      "description": "Bounded semantic coverage review attestations; null when the documented not-applicable marker was used.",
+      "anyOf": [
+        {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/reviewRecord"
+          }
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "reviewRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "title",
+        "upstream",
+        "downstream",
+        "stage",
+        "status",
+        "missingObligations",
+        "rationale",
+        "description"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^SR-[0-9]{3,}$",
+          "description": "Stable unique review-record id."
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "upstream": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The upstream item id this attestation is about."
+        },
+        "downstream": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The downstream item id that declares the relationship."
+        },
+        "stage": {
+          "enum": [
+            "requirement_to_spec",
+            "spec_to_design",
+            "spec_to_tasks",
+            "tasks_to_implementation",
+            "acceptance_to_verification"
+          ]
+        },
+        "status": {
+          "enum": [
+            "COVERED",
+            "PARTIAL",
+            "NEEDS_REVIEW"
+          ],
+          "description": "A model attestation, never a success claim: it can never override a deterministic finding."
+        },
+        "missingObligations": {
+          "type": "string",
+          "minLength": 1
+        },
+        "rationale": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string"
         }
       }
     }

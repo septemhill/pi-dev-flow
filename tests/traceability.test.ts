@@ -20,21 +20,21 @@ test("traceability: a tampered upstream artifact is a hard error", () => {
 test("traceability: every id mentioned must exist in the pinned upstream documents", () => {
   // spec references a requirement that was never written
   const spec = runValidation("spec", SPEC_DOC.replace("- REQ-001", "- REQ-009"));
-  assert.ok(codes(spec).some((c) => c === "SEM_BAD_REF" || c === "TRACE_UPSTREAM_MODIFIED" || c === "STRUCT_UNKNOWN_KV_KEY"), codes(spec).join(","));
+  assert.ok(codes(spec).includes("TRACE_UNKNOWN_ITEM"), codes(spec).join(","));
 
   // design references an acceptance criterion that does not exist
   const design = runValidation("design", DESIGN_DOC.replace(/AC-001/g, "AC-042"));
-  assert.ok(codes(design).includes("SEM_BAD_REF"), codes(design).join(","));
+  assert.ok(codes(design).includes("TRACE_UNKNOWN_ITEM"), codes(design).join(","));
 
   // task plan references a design decision that does not exist
   const plan = runValidation("task_planning", TASK_PLAN_DOC.replace("- References: AC-001", "- References: DES-099").replace("- References: AC-001", "- References: DES-099"));
-  assert.ok(codes(plan).includes("SEM_BAD_REF"), codes(plan).join(","));
+  assert.ok(codes(plan).includes("TRACE_UNKNOWN_ITEM"), codes(plan).join(","));
 });
 
 test("traceability: zero-padded ids resolve (AC-1 == AC-001)", () => {
   const plan = TASK_PLAN_DOC.replace("- References: AC-001", "- References: AC-1").replace("- References: AC-001", "- References: AC-1");
   const result = runValidation("task_planning", plan);
-  assert.ok(!codes(result).includes("SEM_BAD_REF"), codes(result).join(","));
+  assert.ok(!codes(result).includes("TRACE_UNKNOWN_ITEM"), codes(result).join(","));
   assert.equal(result.valid, true, JSON.stringify(result.issues, null, 2));
 });
 

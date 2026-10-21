@@ -14,9 +14,8 @@ import type { ArtifactContract, SectionSpec } from "./artifact-types.ts";
  * previous files in git history so old revisions remain verifiable.
  */
 
-export const CONTRACT_VERSION = "1.0.0";
+export const CONTRACT_VERSION = "1.0.0"; // base version; individual contracts may be higher (spec/design 1.1.0)
 export const PARSER_VERSION = "1.0.0";
-export const SCHEMA_VERSION = "1.0.0";
 export const SCHEMA_DRAFT = "https://json-schema.org/draft/2020-12/schema";
 const SCHEMA_ID_BASE = "https://pi-ai-factory.local/schemas/";
 
@@ -71,6 +70,7 @@ const AC_FIELDS = [
 ] as const;
 
 const DES_FIELDS = [
+  { name: "References", prop: "references", required: true },
   { name: "Rationale", prop: "rationale", required: true },
   { name: "Consequences", prop: "consequences", required: true },
   { name: "Alternatives", prop: "alternatives", required: false },
@@ -99,6 +99,16 @@ const CHECK_FIELDS = [
   { name: "Evidence", prop: "evidence", required: false },
 ] as const;
 
+/** Bounded semantic coverage review (model-attested, extension-validated). */
+const REVIEW_FIELDS = [
+  { name: "Upstream", prop: "upstream", required: true },
+  { name: "Downstream", prop: "downstream", required: true },
+  { name: "Stage", prop: "stage", required: true },
+  { name: "Status", prop: "status", required: true },
+  { name: "Missing Obligations", prop: "missingObligations", required: true },
+  { name: "Rationale", prop: "rationale", required: true },
+] as const;
+
 function contract(
   phase: Phase,
   artifactType: string,
@@ -106,6 +116,7 @@ function contract(
   templateFile: string,
   schemaFile: string,
   sectionOrder: readonly SectionSpec[],
+  version: string = CONTRACT_VERSION,
 ): ArtifactContract {
   const required = sectionOrder.filter((s) => s.required).map((s) => s.name);
   return {
@@ -113,9 +124,9 @@ function contract(
     phase,
     title,
     templateId: `${artifactType}.template`,
-    templateVersion: CONTRACT_VERSION,
-    schemaId: `${SCHEMA_ID_BASE}${artifactType}.schema.json#${SCHEMA_VERSION}`,
-    schemaVersion: SCHEMA_VERSION,
+    templateVersion: version,
+    schemaId: `${SCHEMA_ID_BASE}${artifactType}.schema.json#${version}`,
+    schemaVersion: version,
     parserVersion: PARSER_VERSION,
     templateFile,
     schemaFile,
@@ -174,6 +185,12 @@ export const ARTIFACT_CONTRACTS: Record<Phase, ArtifactContract> = {
         recordIdPrefix: "AC",
         recordFields: AC_FIELDS,
       }),
+      section("Coverage Review", "coverageReview", "records", {
+        recordIdPrefix: "SR",
+        recordFields: REVIEW_FIELDS,
+        allowsNA: true,
+        allowEmptyDescription: true,
+      }),
       section("External Verification Contract", "verificationContract", "text"),
       section("Non-Functional Requirements", "nonFunctionalRequirements", "text", {
         required: false,
@@ -181,6 +198,7 @@ export const ARTIFACT_CONTRACTS: Record<Phase, ArtifactContract> = {
       }),
       section("Unresolved Questions", "unresolvedQuestions", "text", { allowsNA: true }),
     ],
+    "1.1.0", // spec 1.1.0: Coverage Review section (bounded semantic attestation)
   ),
 
   design: contract(
@@ -207,9 +225,16 @@ export const ARTIFACT_CONTRACTS: Record<Phase, ArtifactContract> = {
         recordIdPrefix: "DES",
         recordFields: DES_FIELDS,
       }),
+      section("Coverage Review", "coverageReview", "records", {
+        recordIdPrefix: "SR",
+        recordFields: REVIEW_FIELDS,
+        allowsNA: true,
+        allowEmptyDescription: true,
+      }),
       section("Risks", "risks", "text", { allowsNA: true }),
       section("Open Questions", "openQuestions", "text", { allowsNA: true }),
     ],
+    "1.1.0", // design 1.1.0: DES References field + Coverage Review section
   ),
 
   task_planning: contract(

@@ -14,7 +14,7 @@ import { validateArtifact } from "../src/artifacts/artifact-validator.ts";
 import type { PhaseContext, UpstreamArtifactRef } from "../src/artifacts/validation-context.ts";
 import type { Phase } from "../src/workflow/phases.ts";
 import type { ArtifactValidationResult } from "../src/artifacts/artifact-types.ts";
-import type { CheckRecord, TaskRecord } from "../src/workflow/state.ts";
+import type { CheckRecord, TaskRecord, WaiverRecord } from "../src/workflow/state.ts";
 
 export const CHANGE_ID = "chg-fixture";
 
@@ -67,7 +67,7 @@ export const SPEC_DOC = `# Specification
 
 ## Metadata
 - Artifact Type: spec
-- Contract Version: 1.0.0
+- Contract Version: 1.1.0
 - Change ID: ${CHANGE_ID}
 - Revision: 1
 - Status: complete
@@ -110,6 +110,9 @@ None identified
 
 Running the tool performs the requested behavior.
 
+## Coverage Review
+None identified
+
 ## External Verification Contract
 - The unit-tests check covers AC-001; the typecheck check covers the build.
 
@@ -124,7 +127,7 @@ export const DESIGN_DOC = `# Design
 
 ## Metadata
 - Artifact Type: design
-- Contract Version: 1.0.0
+- Contract Version: 1.1.0
 - Change ID: ${CHANGE_ID}
 - Revision: 1
 - Status: complete
@@ -169,11 +172,15 @@ Unit tests cover AC-001; the typecheck check covers the build.
 
 ### DES-001: Implement as a single module
 
+- References: FR-001, AC-001
 - Rationale: The simplest structure that satisfies AC-001.
 - Consequences: Easy to test; harder to scale later.
 - Alternatives: Multi-module split, rejected as overkill.
 
 The single module keeps the change small and reviewable.
+
+## Coverage Review
+None identified
 
 ## Risks
 None identified
@@ -207,7 +214,7 @@ Small, independently verifiable tasks that implement the design in order.
 - Expected Output: the task's stated result
 - Verification: npm test
 - Dependencies: none
-- References: AC-001
+- References: FR-001, AC-001
 
 ### TASK-002: Wire it up
 
@@ -398,6 +405,8 @@ export interface FixtureOpts {
   upstreamDocs?: Partial<Record<Phase, string | null>>;
   /** Per-phase recorded-hash overrides (to simulate tampered files). */
   upstreamHashes?: Partial<Record<Phase, string>>;
+  /** Waivers recorded against the change (waiver engine tests). */
+  waivers?: WaiverRecord[];
 }
 
 export function fixtureCtx(phase: Phase, opts: FixtureOpts = {}): PhaseContext {
@@ -415,6 +424,7 @@ export function fixtureCtx(phase: Phase, opts: FixtureOpts = {}): PhaseContext {
     tasks: opts.tasks ?? TASKS,
     checks: opts.checks ?? CHECKS,
     upstream: upstreamRefs(phase, opts.upstreamDocs, opts.upstreamHashes),
+    waivers: opts.waivers ?? [],
   };
 }
 

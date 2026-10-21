@@ -3,7 +3,7 @@ import { describeError } from "../workflow/errors.ts";
 import { PHASES, PHASE_ARTIFACT_FILE, nextPhase } from "../workflow/phases.ts";
 import { buildPhasePrompt } from "../execution/phase-executor.ts";
 import { formatValidationResult } from "../artifacts/artifact-validator.ts";
-import type { WorkflowSnapshot } from "../workflow/state.ts";
+import type { WorkflowSnapshot, CoverageStageName } from "../workflow/state.ts";
 
 /**
  * The single `/factory` command dispatcher. pi commands do not have native
@@ -18,6 +18,9 @@ import type { WorkflowSnapshot } from "../workflow/state.ts";
  *   /factory tasks
  *   /factory changes
  *   /factory validate
+ *   /factory traceability
+ *   /factory waive <item-id> <stage> <rationale...>
+ *   /factory revoke-waiver <waiver-id>
  *
  * `sendPhasePrompt` is the only pi-runtime hook (pi.sendUserMessage);
  * everything else is engine code and stays unit-testable.
@@ -81,6 +84,15 @@ export async function handleFactory(
         break;
       case "validate":
         doValidate(ctx, deps);
+        break;
+      case "traceability":
+        doTraceability(ctx, deps);
+        break;
+      case "waive":
+        doWaive(ctx, deps, restStr);
+        break;
+      case "revoke-waiver":
+        doRevokeWaiver(ctx, deps, restStr);
         break;
       default:
         show(ctx, [`Unknown subcommand "${sub}".`, ...usage()]);
@@ -243,6 +255,44 @@ function doValidate(ctx: CommandCtxLike, deps: FactoryDeps): void {
   show(ctx, [...header, formatValidationResult(result)]);
 }
 
+function doTraceability(ctx: CommandCtxLike, deps: FactoryDeps): void {
+  const engine = deps.engineFor(ctx.cwd);
+  show(ctx, [engine.traceabilityReport()]);
+}
+
+const STAGE_NAMES: CoverageStageName[] = ["requirement_to_spec", "spec_to_design", "spec_to_tasks", "tasks_to_implementation", "acceptance_to_verification"];
+
+function doWaive(ctx: CommandCtxLike, deps: FactoryDeps, rest: string): void {
+  const engine = deps.engineFor(ctx.cwd);
+  const m = /^(\S+)\s+(\S+)\s+(.*)$/s.exec(rest.trim());
+  if (!m || !STAGE_NAMES.includes(m[2]! as CoverageStageName)) {
+    show(ctx, [`Usage: /factory waive <item-id> <stage> <rationale>`, `Stages: ${STAGE_NAMES.join(" | ")}`]);
+    return;
+  }
+  const itemId = m[1]!;
+  const stage = m[2]! as (typeof STAGE_NAMES)[number];
+  const rationale = m[3]!;
+  const { waiver, created } = engine.waiveItem(itemId, stage, rationale);
+  show(ctx, [
+    created ? `Waiver ${waiver.id} granted: ${waiver.item_id} @ ${waiver.stage}.` : `Waiver ${waiver.id} already active: ${waiver.item_id} @ ${waiver.stage}.`,
+    `Rationale: ${waiver.rationale}`,
+    "Pinned to the current artifact revisions — any upstream change STALEs this waiver.",
+    "A waiver records an auditable exception; it does NOT change the coverage assessment (reported as WAIVED).",
+    "Verify with: /factory traceability",
+  ]);
+}
+
+function doRevokeWaiver(ctx: CommandCtxLike, deps: FactoryDeps, rest: string): void {
+  const engine = deps.engineFor(ctx.cwd);
+  const id = rest.trim();
+  if (!id) {
+    show(ctx, ["Usage: /factory revoke-waiver <waiver-id>", "Active waivers are listed by /factory traceability."]);
+    return;
+  }
+  const waiver = engine.revokeWaiver(id);
+  show(ctx, [`Waiver ${waiver.id} revoked (${waiver.item_id} @ ${waiver.stage}). The coverage assessment stands again.`]);
+}
+
 // ------------------------------------------------------------- rendering
 
 function usage(): string[] {
@@ -257,6 +307,9 @@ function usage(): string[] {
     "  /factory tasks                show the task plan and progress",
     "  /factory changes              list all changes",
     "  /factory validate             re-run the full artifact validation on the current phase's artifact",
+    "  /factory traceability         show the coverage report: stages, uncovered items, waivers, stale refs",
+    "  /factory waive <id> <stage> <rationale>   record an explicit, auditable coverage waiver",
+    "  /factory revoke-waiver <id>   revoke an active waiver",
   ];
 }
 

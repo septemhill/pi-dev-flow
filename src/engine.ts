@@ -45,9 +45,12 @@ import type {
   CheckStatus,
   TaskRecord,
   TaskStatus,
+  WaiverRecord,
+  CoverageStageName,
   WorkflowRecord,
   WorkflowSnapshot,
 } from "./workflow/state.ts";
+import { buildChangeTrace, renderTraceabilityReport } from "./traceability/report.ts";
 
 export interface NewTaskInput {
   title: string;
@@ -356,6 +359,7 @@ export class FactoryEngine {
       tasks: this.db.listTasks(changeId),
       checks: this.db.listChecks(changeId),
       upstream,
+      waivers: this.db.listWaivers(changeId),
     };
   }
 
@@ -419,6 +423,78 @@ export class FactoryEngine {
     const result = this.runArtifactValidation(w.change_id, phase, text, hash, expectedRevision);
     this.lastValidation = { phase, result };
     return { phase, result, latest };
+  }
+
+  /**
+   * /factory traceability — the deterministic coverage report for the active
+   * change: every stage, every item's coverage state, uncovered items,
+   * stale references and active/stale waivers. Built from the recorded
+   * artifacts only; it never invents links or status.
+   */
+  traceabilityReport(): string {
+    const w = this.requireActive();
+    const trace = buildChangeTrace(this.root, w.change_id, this.db);
+    return renderTraceabilityReport(trace);
+  }
+
+  /**
+   * Grant an explicit, auditable coverage waiver for ONE item at ONE stage.
+   * Only items that exist in the recorded traceability graph can be waived
+   * (no waivers for phantom ids), and the waiver pins the current revision
+   * of every recorded artifact — any upstream change STALEs it. A waiver
+   * never changes the deterministic assessment; it is reported as WAIVED.
+   */
+  waiveItem(
+    itemId: string,
+    stage: CoverageStageName,
+    rationale: string,
+  ): { waiver: WaiverRecord; created: boolean } {
+    const w = this.requireActive();
+    if (rationale.trim().length < 10) {
+      throw new WorkflowError("CONTRACT_ERROR", `Waiver rationale too short for ${itemId} @ ${stage}. State precisely why the obligation is acceptable without coverage (≥10 characters), or cover the item properly.`);
+    }
+    const trace = buildChangeTrace(this.root, w.change_id, this.db);
+    const known = (trace.report?.assessments ?? []).filter((a) => a.stage === stage);
+    const hit = known.find((a) => a.item.id === itemId);
+    if (!hit) {
+      const list = known.length > 0 ? known.map((a) => a.item.id).join(", ") : "none";
+      throw new WorkflowError("CONTRACT_ERROR", `Cannot waive ${itemId} @ ${stage}: the item is not assessable at that stage. Assessable items at ${stage}: ${list}. Waivers can only record exceptions for real, uncovered obligations — they cannot fabricate coverage.`);
+    }
+    if (hit.status === "VERIFIED" || hit.status === "COVERED") {
+      throw new WorkflowError("CONTRACT_ERROR", `${itemId} @ ${stage} is already ${hit.status}. Waivers exist for UNCOVERED/PARTIAL obligations, not to override successful evidence.`);
+    }
+    const pinned: Partial<Record<Phase, number>> = {};
+    for (const a of trace.artifacts) pinned[a.phase] = a.revision;
+    const rec: WaiverRecord = {
+      id: `wv-${w.change_id.slice(-8)}-${itemId}-${stage}-${Date.now().toString(36)}`,
+      change_id: w.change_id,
+      item_id: itemId,
+      stage,
+      rationale: rationale.trim(),
+      status: "ACTIVE",
+      pinned_revisions: JSON.stringify(pinned),
+      created_at: this.now(),
+    };
+    const { waiver, created } = this.db.addWaiver(rec);
+    this.db.insertEvent(w.id, w.change_id, w.current_phase, created ? "WAIVER_GRANTED" : "WAIVER_EXISTS", `${created ? "Granted" : "Already granted"} ${waiver.id} for ${itemId} @ ${stage}: ${waiver.rationale}`, this.now());
+    return { waiver, created };
+  }
+
+  /** Revoke an active waiver (explicit; the coverage assessment stands again). */
+  revokeWaiver(id: string): WaiverRecord {
+    const w = this.requireActive();
+    const existing = this.db.getWaiver(id);
+    if (!existing || existing.change_id !== w.change_id) {
+      throw new WorkflowError("CHANGE_NOT_FOUND", `No waiver ${id} recorded for change ${w.change_id}.`);
+    }
+    if (existing.status !== "ACTIVE") {
+      throw new WorkflowError("ILLEGAL_TRANSITION", `Waiver ${id} is ${existing.status}, not ACTIVE — nothing to revoke.`);
+    }
+    const changed = this.db.revokeWaiver(id);
+    if (!changed) throw new WorkflowError("ILLEGAL_TRANSITION", `Waiver ${id} could not be revoked (concurrent change?).`);
+    const updated = this.db.getWaiver(id)!;
+    this.db.insertEvent(w.id, w.change_id, w.current_phase, "WAIVER_REVOKED", `Revoked ${id} (${updated.item_id} @ ${updated.stage})`, this.now());
+    return updated;
   }
 
   /** Structural + semantic + schema + traceability + phase-specific validation. Throws WorkflowError with the full list of problems. */

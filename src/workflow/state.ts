@@ -14,6 +14,33 @@ export type TaskStatus = "PENDING" | "IN_PROGRESS" | "DONE";
 
 export type CheckStatus = "PASSED" | "FAILED" | "SKIPPED" | "MANUAL";
 
+export type WaiverStatus = "ACTIVE" | "REVOKED";
+
+export type CoverageStageName =
+  | "requirement_to_spec"
+  | "spec_to_design"
+  | "spec_to_tasks"
+  | "tasks_to_implementation"
+  | "acceptance_to_verification";
+
+/**
+ * An explicit, auditable exception: one item is exempt from one coverage
+ * stage. A waiver never changes the deterministic assessment — it is stored
+ * alongside it and reported as WAIVED. It pins the upstream artifact
+ * revisions at grant time; any of those advancing STALEs the waiver.
+ */
+export interface WaiverRecord {
+  id: string;
+  change_id: string;
+  item_id: string;
+  stage: CoverageStageName;
+  rationale: string;
+  status: WaiverStatus;
+  /** JSON: { phase: revision } at grant time. */
+  pinned_revisions: string;
+  created_at: string;
+}
+
 export interface WorkflowRecord {
   id: string;
   change_id: string;

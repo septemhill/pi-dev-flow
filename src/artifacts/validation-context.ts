@@ -1,5 +1,5 @@
 import type { Phase } from "../workflow/phases.ts";
-import type { CheckRecord, TaskRecord } from "../workflow/state.ts";
+import type { CheckRecord, TaskRecord, WaiverRecord } from "../workflow/state.ts";
 
 /**
  * Everything the validator needs to know about the rest of the workflow in
@@ -37,6 +37,8 @@ export interface PhaseContext {
   checks: CheckRecord[];
   /** Approved upstream artifacts, in phase order. */
   upstream: UpstreamArtifactRef[];
+  /** Coverage waivers recorded for this change (ACTIVE and REVOKED; the engine computes staleness). */
+  waivers: WaiverRecord[];
 }
 
 /** Map persisted check status → report status (documented contract). */
