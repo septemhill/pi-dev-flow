@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { test } from "vitest";
 import assert from "node:assert/strict";
 import { getContract } from "../src/artifacts/artifact-registry.ts";
 import { parseArtifact } from "../src/artifacts/markdown-parser.ts";

@@ -312,7 +312,8 @@ item×stage; grants/revocations are audit events.
 ```bash
 npm install
 npm run typecheck     # strict tsc --noEmit
-npm test              # node --test (96 tests: workflow, approval, recovery, parser, schema, semantic, traceability, coverage, approval-validation, legacy)
+npm test              # vitest run (96 tests: workflow, approval, recovery, parser, schema, semantic, traceability, coverage, approval-validation, legacy)
+npm run test:watch    # vitest in watch mode
 ```
 
 Live smoke test:
@@ -325,18 +326,18 @@ pi -p --extension /path/to/pi-ai-factory/index.ts "/factory init hello"
 ## Layout
 
 ```
-index.ts                          # extension entry: /factory command + 6 tools + widget
-src/engine.ts                     # FactoryEngine — the only code that mutates workflow state
-src/workflow/phases.ts            # phase order, artifact files
-src/workflow/transitions.ts       # pure, total transition functions (the whole state machine)
-src/workflow/errors.ts            # typed WorkflowError + human-readable descriptions
-src/workflow/state.ts             # record types
-src/persistence/database.ts       # node:sqlite schema + transactional access
-src/artifacts/artifact-registry.ts# pinned contracts: template id/version + schema id per phase
-src/artifacts/artifact-types.ts   # shared artifact/issue/record types
-src/artifacts/template-loader.ts  # load the pinned template for a contract
-src/artifacts/markdown-parser.ts  # 1. deterministic template → JSON parse
-src/artifacts/schema-validator.ts # 2. JSON Schema (draft 2020-12, Ajv) validation
+index.ts                                # extension entry: /factory command + 6 tools + widget
+src/engine.ts                           # FactoryEngine — the only code that mutates workflow state
+src/workflow/phases.ts                  # phase order, artifact files
+src/workflow/transitions.ts             # pure, total transition functions (the whole state machine)
+src/workflow/errors.ts                  # typed WorkflowError + human-readable descriptions
+src/workflow/state.ts                   # record types
+src/persistence/database.ts             # node:sqlite schema + transactional access
+src/artifacts/artifact-registry.ts      # pinned contracts: template id/version + schema id per phase
+src/artifacts/artifact-types.ts         # shared artifact/issue/record types
+src/artifacts/template-loader.ts        # load the pinned template for a contract
+src/artifacts/markdown-parser.ts        # 1. deterministic template → JSON parse
+src/artifacts/schema-validator.ts       # 2. JSON Schema (draft 2020-12, Ajv) validation
 src/artifacts/traceability-validator.ts # 3. upstream integrity + cross-artifact id resolution
 src/artifacts/semantic-validator.ts     # 4. phase rules vs. persisted state
 src/artifacts/artifact-validator.ts     # pipeline orchestrator + result formatting
@@ -348,14 +349,14 @@ src/traceability/issues.ts              # coverage → gate diagnostics mapping
 src/traceability/semantic-review.ts     # bounded semantic (model) review validation
 src/traceability/waivers.ts             # shared waiver resolution (gates and report agree)
 src/traceability/report.ts              # /factory traceability report (build + render)
-src/artifacts/artifact-store.ts   # path-safe artifact file I/O + sha256
-src/templates/*.template.md       # the six pinned artifact templates
-src/schemas/*.schema.json         # the six pinned JSON Schemas (draft 2020-12)
-src/approvals/approval-manager.ts # approval preconditions (pending, hash-still-matches)
-src/execution/phase-executor.ts   # builds the per-phase LLM work order from persisted state
-src/commands/factory.ts           # /factory command handler
-prompts/*.md                      # the six phase instruction templates
-tests/                           # test suites (workflow, approval, recovery, template-parser,
-                                  #   schema-validation, semantic-validation, traceability,
-                                  #   coverage, approval-validation, legacy) + shared fixtures
+src/artifacts/artifact-store.ts         # path-safe artifact file I/O + sha256
+src/templates/*.template.md             # the six pinned artifact templates
+src/schemas/*.schema.json               # the six pinned JSON Schemas (draft 2020-12)
+src/approvals/approval-manager.ts       # approval preconditions (pending, hash-still-matches)
+src/execution/phase-executor.ts         # builds the per-phase LLM work order from persisted state
+src/commands/factory.ts                 # /factory command handler
+prompts/*.md                            # the six phase instruction templates
+tests/                                  # test suites (workflow, approval, recovery, template-parser,
+                                        # schema-validation, semantic-validation, traceability,
+                                        # coverage, approval-validation, legacy) + shared fixtures
 ```

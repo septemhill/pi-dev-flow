@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { test } from "vitest";
 import assert from "node:assert/strict";
 import { sha256 } from "../src/artifacts/artifact-store.ts";
 import { DESIGN_DOC, REQ_DOC, SPEC_DOC, TASK_PLAN_DOC, VERIF_DOC, codes, runValidation } from "./validation-fixture.ts";

@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { test } from "vitest";
 import assert from "node:assert/strict";
 import { DOCS, REQ_DOC, runValidation, codes } from "./validation-fixture.ts";
 import type { Phase } from "../src/workflow/phases.ts";

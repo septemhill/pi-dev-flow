@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { test } from "vitest";
 import assert from "node:assert/strict";
 import { appendFileSync, readFileSync } from "node:fs";
 import { handleFactory } from "../src/commands/factory.ts";
