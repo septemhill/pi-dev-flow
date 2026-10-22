@@ -60,7 +60,46 @@ test("init-input: inline text and --file cannot be mixed", () => {
 test("init-input: duplicate --file paths are rejected", () => {
   assert.throws(
     () => parseInitArgs("--file a.md --file b.md --file a.md"),
-    (e: unknown) => isWorkflowError(e) && /Duplicate --file path: "a.md"/.test(e.message),
+    (e: unknown) => isWorkflowError(e) && /Duplicate file path: "a.md"/.test(e.message),
+  );
+});
+
+test("init-input: @<path> is a repeatable shorthand for --file <path>", () => {
+  const r = parseInitArgs("@requirements/authentication.md @requirements/security.md");
+  assert.equal(r.inline, "");
+  assert.deepEqual(r.files, ["requirements/authentication.md", "requirements/security.md"]);
+  // bare "@" has no path
+  assert.throws(
+    () => parseInitArgs("@"),
+    (e: unknown) => isWorkflowError(e) && e.code === "INVALID_INIT_INPUT" && /File reference "@" needs a path/.test(e.message),
+  );
+  assert.throws(
+    () => parseInitArgs("@ --file a.md"),
+    (e: unknown) => isWorkflowError(e) && /File reference "@" needs a path/.test(e.message),
+  );
+});
+
+test("init-input: --file and @<path> are interchangeable and order-preserving", () => {
+  // mixed notations: order of appearance is kept
+  const r = parseInitArgs("@a.md --file b.md");
+  assert.deepEqual(r.files, ["a.md", "b.md"]);
+  // duplicates are detected across notations
+  assert.throws(
+    () => parseInitArgs("@a.md --file a.md"),
+    (e: unknown) => isWorkflowError(e) && /Duplicate file path: "a.md"/.test(e.message),
+  );
+  // --file @foo.md names the literal file "@foo.md" (no shorthand after --file)
+  const r2 = parseInitArgs("--file @foo.md");
+  assert.deepEqual(r2.files, ["@foo.md"]);
+  // @/abs/path yields an absolute path
+  const r3 = parseInitArgs("@/tmp/req.md");
+  assert.deepEqual(r3.files, ["/tmp/req.md"]);
+});
+
+test("init-input: inline text and @<path> cannot be mixed", () => {
+  assert.throws(
+    () => parseInitArgs("Add login @docs/req.md"),
+    (e: unknown) => isWorkflowError(e) && e.code === "INVALID_INIT_INPUT" && /cannot be combined/.test(e.message),
   );
 });
 
@@ -277,6 +316,33 @@ test("init command: inline input still works unchanged", async () => {
   assert.equal(w!.description, "Implement a user authentication feature");
   assert.equal(w!.current_phase, "understanding");
   assert.ok(notifications.some((n) => /inline description/.test(n)));
+  engine.close();
+  cleanup(root);
+});
+
+test("init command: @<path> shorthand reaches the same initialization path", async () => {
+  const root = makeRoot();
+  const engine = newEngine(root);
+  const sent: string[] = [];
+
+  mkdirSync(path.join(root, "requirements"), { recursive: true });
+  writeFileSync(path.join(root, "requirements", "authentication.md"), AUTH_MD);
+  writeFileSync(path.join(root, "requirements", "security.md"), SEC_MD);
+
+  const { ctx, notifications, deps } = commandCtx(engine, sent);
+  await handleFactory("init @requirements/authentication.md @requirements/security.md", ctx, deps);
+
+  const w = engine.getActiveWorkflow();
+  assert.ok(w, "a workflow must be created");
+  assert.equal(w!.current_phase, "understanding");
+  assert.equal(w!.status, "IDLE");
+  assert.equal(w!.description.indexOf("# Input File 1: requirements/authentication.md"), 0);
+  assert.ok(w!.description.indexOf("# Input File 2: requirements/security.md") > 0);
+  assert.match(w!.description, /sign in and sign out/);
+  assert.match(w!.description, /rate limits/);
+  assert.ok(notifications.some((n) => /Change created/.test(n)));
+  assert.ok(notifications.some((n) => /2 file\(s\)/.test(n)));
+
   engine.close();
   cleanup(root);
 });

@@ -10,32 +10,37 @@ import { WorkflowError } from "../workflow/errors.ts";
  *   /factory init <description>
  *   /factory init --file <path>
  *   /factory init --file <path> --file <path> …
+ *   /factory init @<path>
+ *   /factory init @<path> @<path> …
  *
  * Rules (all enforced here, before any workflow state is created):
- * - `--file` is repeatable; order of appearance is the document order.
- * - Inline text and `--file` inputs cannot be mixed (provenance would be
- *   ambiguous for the inline part); exactly one form per invocation.
+ * - `--file <path>` and the `@<path>` shorthand are equivalent file
+ *   references, both repeatable; order of appearance is the document order.
+ *   (`--file @foo.md` names the literal file "@foo.md" — only bare `@<path>`
+ *   tokens are shorthand.)
+ * - Inline text and file inputs (--file / @path) cannot be mixed (provenance
+ *   would be ambiguous for the inline part); exactly one form per invocation.
  * - Each file is read and validated (exists, regular file, readable, valid
  *   UTF-8, non-whitespace) before anything is returned. A single bad file
  *   aborts the whole input; there is no partial success.
  * - File paths are resolved against the command's working directory
- *   (relative paths) or used as-is (absolute paths). No directory
- *   traversal, no wildcard expansion — the string is handed straight to the
- *   filesystem API.
+ *   (relative paths) or used as-is (absolute paths; `@/abs/path` too). No
+ *   directory traversal, no wildcard expansion — the string is handed
+ *   straight to the filesystem API.
  * - File contents are never interpreted, modified, or truncated; they are
  *   combined verbatim with explicit provenance boundaries.
  */
 
 export interface InitInput {
-  /** Inline description (tokens joined with single spaces); "" when --file was used. */
+  /** Inline description (tokens joined with single spaces); "" when file inputs were used. */
   inline: string;
-  /** --file paths exactly as given, in order. */
+  /** File paths (from --file and @<path>) in order of appearance. */
   files: string[];
 }
 
 const USAGE =
-  "Usage: /factory init <description>  |  /factory init --file <path> [--file <path> …]  " +
-  "(inline text and --file inputs cannot be mixed)";
+  "Usage: /factory init <description>  |  /factory init --file <path> [--file <path> …]  |  /factory init @<path> [@<path> …]  " +
+  "(inline text and file inputs cannot be mixed)";
 
 function inputError(message: string): WorkflowError {
   return new WorkflowError("INVALID_INIT_INPUT", `${message}\n${USAGE}`);
@@ -61,20 +66,26 @@ export function parseInitArgs(raw: string): InitInput {
       files.push(p);
     } else if (t.startsWith("--")) {
       throw inputError(`Unknown option "${t}".`);
+    } else if (t.startsWith("@")) {
+      // `@<path>` shorthand for `--file <path>`; "@" alone has no path.
+      if (t === "@") {
+        throw inputError(`File reference "@" needs a path after it (e.g. @requirements/auth.md).`);
+      }
+      files.push(t.slice(1));
     } else {
       inlineTokens.push(t);
     }
   }
   if (files.length > 0 && inlineTokens.length > 0) {
     throw inputError(
-      "Inline text and --file inputs cannot be combined (the inline part would have no provenance). " +
+      "Inline text and file inputs (--file / @<path>) cannot be combined (the inline part would have no provenance). " +
         "Put the extra context into one of the files, or use plain inline text.",
     );
   }
   const seen = new Set<string>();
   for (const f of files) {
     if (seen.has(f)) {
-      throw inputError(`Duplicate --file path: "${f}". List each file at most once.`);
+      throw inputError(`Duplicate file path: "${f}". List each file at most once.`);
     }
     seen.add(f);
   }

@@ -239,18 +239,23 @@ Requires Node ≥ 22.5 (built-in `node:sqlite`).
 /factory init Implement a user authentication feature
 /factory init --file requirements/authentication.md
 /factory init --file requirements/authentication.md --file requirements/security.md
+/factory init @requirements/authentication.md @requirements/security.md
 ```
 
 - **Inline vs. files.** Use inline text for a short, self-contained change
-  description. Use `--file` when the requirement content lives in one or more
-  existing documents — the files are read verbatim (no summarizing or merging
-  by the command) and fed into the same requirement-understanding entry point
-  as inline text. Inline text and `--file` inputs cannot be combined in one
-  invocation (`INVALID_INIT_INPUT`) — put extra context into a file instead.
-- **Multiple files.** `--file` is repeatable; files are combined in the order
-  the options appear, with a `# Input File N: <path>` header and a `---`
-  separator between files so their contents stay distinct. Each file's content
-  (headings, lists, code blocks) is preserved verbatim.
+  description. Use `--file` / `@<path>` when the requirement content lives in
+  one or more existing documents — the files are read verbatim (no
+  summarizing or merging by the command) and fed into the same
+  requirement-understanding entry point as inline text. Inline text and file
+  inputs cannot be combined in one invocation (`INVALID_INIT_INPUT`) — put
+  extra context into a file instead.
+- **Multiple files.** `--file` is repeatable, and `@<path>` is a shorthand
+  for `--file <path>` (both repeatable, and usable in the same invocation).
+  Files are combined in the order the references appear, with a
+  `# Input File N: <path>` header and a `---` separator between files so
+  their contents stay distinct. Each file's content (headings, lists, code
+  blocks) is preserved verbatim. Note: `--file @foo.md` names the literal
+  file `@foo.md` — only bare `@<path>` tokens are shorthand.
 - **Path resolution.** Relative paths resolve against the working directory
   the extension runs in; absolute paths work as-is. No directory traversal,
   wildcards, or remote input. Provenance labels use the project-relative path

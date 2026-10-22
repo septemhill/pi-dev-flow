@@ -12,7 +12,7 @@ import type { WorkflowSnapshot, CoverageStageName } from "../workflow/state.ts";
  * subcommands, so all sub-actions are parsed from the argument string:
  *
  *   /factory init <description>
- *   /factory init --file <path> [--file <path> …]
+ *   /factory init --file <path> [--file <path> …]   (or the @<path> shorthand)
  *   /factory status
  *   /factory run
  *   /factory approve [comment]
@@ -321,7 +321,7 @@ function usage(): string[] {
   return [
     "Factory commands:",
     "  /factory init <description>   create a new change (starts at understanding)",
-    "  /factory init --file <path> [--file <path> …]   create a new change from one or more UTF-8 text files (order preserved; cannot be mixed with inline text)",
+    "  /factory init --file <path> [--file <path> …]   create a new change from one or more UTF-8 text files (also: @<path> shorthand; order preserved; cannot be mixed with inline text)",
     "  /factory status               show phase, status, artifact, approval, tasks",
     "  /factory run                  execute/resume the current phase (never bypasses approvals)",
     "  /factory approve [comment]    approve the pending phase artifact (human gate)",
