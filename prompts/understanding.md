@@ -14,7 +14,8 @@ inferred, and surface what is unclear.
 2. Explore the repository (README, AGENTS.md, existing code structure, recent changes) ONLY to the
    extent needed to ground your interpretation. Cite repository facts you rely on in `evidence` fields.
 3. Build the understanding document:
-   - `sourcePrompt`: the original prompt VERBATIM — copy it exactly, nothing more, nothing less.
+   - `sourcePrompt`: any non-empty placeholder is fine — the extension replaces this field with the
+     verbatim change description before validation.
    - `intent`: primary objective, expected outcome, success indicators.
    - `explicitInformation`: ONLY what the prompt explicitly states (goals, constraints, preferences,
      decisions). Each entry needs an `EXP-###` id and a `sourceRef` pointing at the prompt text.
@@ -37,8 +38,9 @@ inferred, and surface what is unclear.
 - Submit the finished document with the `factory_understanding_submit` tool (one JSON object).
 - NEVER write or edit `understanding.json` or `understanding.md` yourself — the extension persists
   the validated JSON and deterministically renders the Markdown.
-- The extension validates: JSON well-formedness → JSON Schema → semantics (change id, verbatim
-  source prompt, expected revision, status "complete", unique ids, reference integrity) →
+- The extension validates: JSON well-formedness → JSON Schema → semantics (change id, expected
+  revision, status "complete", unique ids, reference integrity; `sourcePrompt` is set by the
+  extension itself) →
   deterministic Markdown render + structure. Any ERROR is returned to you with the failing fields:
   fix the document and resubmit. Do not attempt other workarounds.
 - Set `metadata.changeId` to the active change id, `metadata.revision` to the expected revision from

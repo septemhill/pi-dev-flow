@@ -24,8 +24,7 @@
     "sourcePrompt": {
       "type": "string",
       "minLength": 1,
-      "maxLength": 20000,
-      "description": "The original prompt (the change description) VERBATIM. It is rendered into the 'Original Prompt' section of understanding.md inside a code fence and must exactly match the change description recorded by the extension."
+      "description": "The original prompt (the change description) VERBATIM. The extension fills this field from the recorded change description, replacing whatever the LLM submitted, so it is always the authoritative text. Rendered into the 'Original Prompt' section of understanding.md inside a code fence."
     },
     "intent": {
       "type": "object",
@@ -36,13 +35,13 @@
         "objective": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 2000,
+          "maxLength": 20000,
           "description": "The primary objective as interpreted from the prompt."
         },
         "expectedOutcome": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 2000,
+          "maxLength": 20000,
           "description": "The expected end state or outcome if the objective is achieved."
         },
         "successIndicators": {
@@ -139,7 +138,7 @@
         "narrative": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 4000,
+          "maxLength": 40000,
           "description": "Concise summary of the interpreted intent and important conclusions."
         },
         "unresolvedIssues": {
@@ -265,7 +264,7 @@
         "statement": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 2000,
+          "maxLength": 20000,
           "description": "The explicitly stated information, in the user's terms."
         },
         "sourceRef": {
@@ -290,19 +289,19 @@
         "statement": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 2000,
+          "maxLength": 20000,
           "description": "The inferred conclusion or assumption."
         },
         "evidence": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 2000,
+          "maxLength": 20000,
           "description": "The prompt text, repository fact, or artifact entry supporting the inference."
         },
         "rationale": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 2000,
+          "maxLength": 20000,
           "description": "Concise, auditable rationale for the inference (not hidden chain-of-thought)."
         },
         "confidence": {
@@ -312,7 +311,7 @@
         "impactIfWrong": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 2000,
+          "maxLength": 20000,
           "description": "Consequence if this inference turns out to be incorrect."
         },
         "status": {
@@ -336,7 +335,7 @@
         "evidence": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 2000,
+          "maxLength": 20000,
           "description": "The prompt statement or artifact evidence supporting the out-of-scope classification. Unstated functionality must NOT be listed here."
         }
       }
@@ -355,7 +354,7 @@
         "question": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 2000,
+          "maxLength": 20000,
           "description": "The unresolved question or ambiguous statement."
         },
         "interpretations": {
@@ -373,7 +372,7 @@
         "impact": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 2000,
+          "maxLength": 20000,
           "description": "Impact on the change if the wrong interpretation is chosen."
         },
         "status": {
@@ -383,7 +382,7 @@
         "resolution": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 2000,
+          "maxLength": 20000,
           "description": "How the ambiguity was resolved (required when status is resolved)."
         }
       },
@@ -396,7 +395,7 @@
           "resolution": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 2000
+            "maxLength": 20000
           }
         }
       }
@@ -415,7 +414,7 @@
         "statement": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 2000,
+          "maxLength": 20000,
           "description": "The candidate requirement statement."
         },
         "origin": {

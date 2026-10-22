@@ -115,7 +115,7 @@ export function validateUnderstandingArtifact(input: UnderstandingValidateInput)
       issues.push(
         mk(contract, "SEM_SOURCE_PROMPT_MISMATCH", "sourcePrompt does not match the change description recorded by the extension; the original prompt must be quoted VERBATIM.", "semantic", {
           fieldPath: "sourcePrompt",
-          suggestedFix: "Copy the original prompt exactly from the phase prompt (it is shown verbatim).",
+          suggestedFix: "The canonical understanding.json must keep the recorded change description verbatim; restore the file (or regenerate the projection) and re-validate.",
         }),
       );
     }

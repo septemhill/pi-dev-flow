@@ -64,6 +64,53 @@ test("understanding: a valid submission persists JSON + deterministic Markdown a
   cleanup(root);
 });
 
+test("understanding: the extension owns sourcePrompt — a paraphrase or placeholder is replaced with the recorded description", () => {
+  const root = makeRoot();
+  // a long, file-style description that a model could never reliably reproduce
+  // character-for-character (and that exceeded the old 20000-char schema limit)
+  const desc = ("Requirements from a long design document. ".repeat(600) + " ").trim(); // ~24 KB
+  const { engine, changeId } = runningUnderstanding(root, desc);
+
+  const doc = makeUnderstandingDoc(changeId, desc);
+  // the helper embeds the description in EXP-001; keep entry fields short so
+  // the document's own limits are not what is being exercised here
+  doc.explicitInformation = [{ id: "EXP-001", type: "goal", statement: "See the original prompt.", sourceRef: "original prompt" }];
+  (doc.candidateRequirements as Array<Record<string, unknown>>)[0]!.statement = "Implement the described change.";
+  // the model's sourcePrompt is a paraphrase/placeholder, not a verbatim copy
+  doc.sourcePrompt = "(the original prompt — long, paraphrased here on purpose)";
+
+  const r = engine.submitUnderstanding(doc);
+  assert.equal(r.revision, 1);
+
+  const persisted = JSON.parse(readFileSync(changeFile(root, changeId, "understanding.json"), "utf8"));
+  assert.equal(persisted.sourcePrompt, desc, "the persisted document must carry the recorded description, verbatim");
+  const mdText = readFileSync(changeFile(root, changeId, "understanding.md"), "utf8");
+  assert.ok(mdText.includes(desc), "the Markdown projection renders the authoritative prompt");
+  engine.close();
+  cleanup(root);
+});
+
+test("understanding: a tampered sourcePrompt on disk is still caught by the file-based validation path", async () => {
+  const root = makeRoot();
+  const { engine, changeId } = runningUnderstanding(root, "Tampered prompt");
+  engine.submitUnderstanding(makeUnderstandingDoc(changeId, "Tampered prompt"));
+
+  // out-of-band tamper: swap the authoritative prompt for another text
+  const jsonFile = changeFile(root, changeId, "understanding.json");
+  const doc = JSON.parse(readFileSync(jsonFile, "utf8"));
+  doc.sourcePrompt = "A different prompt than the one the extension recorded.";
+  writeFileSync(jsonFile, JSON.stringify(doc, null, 2) + "\n", "utf8");
+
+  const { ctx, notifications } = commandCtx(engine, []);
+  await handleFactory("validate", ctx, { engineFor: () => engine, sendPhasePrompt: () => {} });
+  const text = notifications.join("\n");
+  assert.match(text, /Validation FAILED/i);
+  assert.match(text, /SEM_SOURCE_PROMPT_MISMATCH/);
+  assert.match(text, /VERBATIM/);
+  engine.close();
+  cleanup(root);
+});
+
 test("understanding: a failed submission writes nothing (previous state untouched)", () => {
   const root = makeRoot();
   const { engine, changeId } = runningUnderstanding(root, "Broken submit");
@@ -91,7 +138,7 @@ test("understanding: malformed JSON text is rejected as a contract error", () =>
   cleanup(root);
 });
 
-test("understanding: semantic rules are enforced (change id, verbatim prompt, status, ids, refs)", () => {
+test("understanding: semantic rules are enforced (change id, status, ids, refs)", () => {
   const root = makeRoot();
   const { engine, changeId } = runningUnderstanding(root, "Semantics");
   const desc = "Semantics";
@@ -99,11 +146,6 @@ test("understanding: semantic rules are enforced (change id, verbatim prompt, st
   const wrongChange = makeUnderstandingDoc("chg-19700101-000000", desc);
   let err = assertThrowsWorkflowError(() => engine.submitUnderstanding(wrongChange), "INVALID_ARTIFACT");
   assert.match(err.message, /SEM_CHANGE_ID_MISMATCH/);
-
-  const paraphrased = makeUnderstandingDoc(changeId, "The semantics of things");
-  err = assertThrowsWorkflowError(() => engine.submitUnderstanding(paraphrased), "INVALID_ARTIFACT");
-  assert.match(err.message, /SEM_SOURCE_PROMPT_MISMATCH/);
-  assert.match(err.message, /VERBATIM/);
 
   const draft = makeUnderstandingDoc(changeId, desc, { metadata: makeUnderstandingDoc(changeId, desc).metadata });
   (draft.metadata as Record<string, unknown>).status = "draft";

@@ -43,7 +43,7 @@ export interface PromptContext {
 const PHASE_CONTRACT_EXTRA: Record<Phase, string> = {
   understanding:
     "- Submit the document with the `factory_understanding_submit` tool (one JSON object). The extension validates it, persists `understanding.json`, and deterministically renders `understanding.md` — NEVER write or edit either file yourself.\n" +
-    "- `sourcePrompt` must be the original prompt VERBATIM (shown above, JSON-encoded); `metadata.changeId` must be the active change id; `metadata.revision` must be the expected revision above; `metadata.status` must be \"complete\".\n" +
+    "- `sourcePrompt` is set by the extension itself from the recorded change description — any non-empty string you supply is replaced, so do not worry about reproducing the prompt character-for-character. `metadata.changeId` must be the active change id; `metadata.revision` must be the expected revision above; `metadata.status` must be \"complete\".\n" +
     "- Every EXP/INF/Q/CR entry needs a unique stable id; every candidate's `sourceRefs` must cite ids declared in the same document (or the literal \"prompt\").\n" +
     "- Do not classify unstated functionality as out of scope without evidence; put it in `scope.undetermined` instead.\n" +
     "- After a successful submission, call `factory_phase_complete`.\n",
@@ -123,12 +123,15 @@ export function buildPhasePrompt(ctx: PromptContext): string {
   sections.push(ctxLines.join("\n"));
 
   // Understanding phase: the original prompt (change description) is the
-  // verbatim source input the document must quote back exactly.
+  // verbatim source input the document interprets. The extension pins it as
+  // sourcePrompt itself; the agent only needs to read it carefully.
   if (isUnderstanding) {
     sections.push(
       "## Original prompt (verbatim source input)\n" +
-        `The change description, JSON-encoded for exactness: ${JSON.stringify(w.description)}\n\n` +
-        "Your document's `sourcePrompt` field must contain EXACTLY this text (nothing more, nothing less).",
+        `The change description, JSON-encoded for readability: ${JSON.stringify(w.description)}\n\n` +
+        "Interpret this prompt. You do NOT need to copy it into the document: the extension " +
+        "sets the document's `sourcePrompt` from the recorded change description itself, so it is " +
+        "always the verbatim text.",
     );
   }
 
@@ -200,7 +203,7 @@ export function buildPhasePrompt(ctx: PromptContext): string {
     }
     const skeleton = readContractFile(templatesDir(), contract.templateFile);
     if (skeleton) {
-      contractLines.push("Document skeleton (replace every <placeholder> with real content; remove the $comment line before submitting):");
+      contractLines.push("Document skeleton (replace every <placeholder> with real content; submit the finished document with `factory_understanding_submit`):");
       contractLines.push("```json\n" + skeleton.trim() + "\n```");
     }
   } else {

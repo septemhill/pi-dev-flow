@@ -461,13 +461,16 @@ export class FactoryEngine {
    * artifact generation). The LLM proposes the document; ALL of the following
    * is extension code:
    *   1. JSON parse (a string is parsed; malformed JSON is rejected)
-   *   2. JSON Schema validation (pinned Draft 2020-12, fail closed)
-   *   3. semantic validation (change id, verbatim source prompt, revision,
+   *   2. source-prompt pinning: the extension replaces the LLM's
+   *      `sourcePrompt` with the recorded change description (verbatim is
+   *      guaranteed by construction, not by the model's copying ability)
+   *   3. JSON Schema validation (pinned Draft 2020-12, fail closed)
+   *   4. semantic validation (change id, source prompt, revision,
    *      status=complete, duplicate local ids, reference integrity)
-   *   4. deterministic Markdown render + structure validation
-   *   5. atomic persistence of understanding.json THEN understanding.md,
+   *   5. deterministic Markdown render + structure validation
+   *   6. atomic persistence of understanding.json THEN understanding.md,
    *      with post-write read-back verification
-   * Nothing is written unless layers 1–4 all pass; a failed submission
+   * Nothing is written unless layers 1–5 all pass; a failed submission
    * leaves the previous state untouched.
    */
   submitUnderstanding(input: unknown): { revision: number; hash: string; jsonPath: string; mdPath: string; warnings: number } {
@@ -491,6 +494,17 @@ export class FactoryEngine {
           `Submitted understanding is not valid JSON: ${e instanceof Error ? e.message : String(e)}. Fix the JSON and resubmit via factory_understanding_submit.`,
         );
       }
+    }
+    // The extension owns the source prompt. The recorded change description
+    // is the authoritative verbatim text, so whatever the LLM put in
+    // `sourcePrompt` is replaced before validation and persistence.
+    // Verbatim-ness is thereby *guaranteed* instead of hoping the model
+    // reproduces a (possibly multi-kilobyte, file-based) prompt character
+    // for character — which is exactly the failure mode that made
+    // submissions keep failing. The semantic check in the validator still
+    // guards the file-based paths (validate/complete) against tampering.
+    if (doc !== null && typeof doc === "object" && !Array.isArray(doc)) {
+      (doc as Record<string, unknown>).sourcePrompt = w.description;
     }
     const jsonText = JSON.stringify(doc, null, 2) + "\n";
 

@@ -121,7 +121,8 @@ export default function factoryExtension(pi: ExtensionAPI) {
     description:
       "Submit the understanding document (JSON-first artifact generation, understanding phase only). " +
       "The extension parses the JSON, validates it against the pinned JSON Schema and semantic rules " +
-      "(change id, verbatim source prompt, expected revision, status complete, unique local ids, reference integrity), " +
+      "(change id, expected revision, status complete, unique local ids, reference integrity; " +
+      "the extension pins `sourcePrompt` from the recorded change description, replacing whatever you supply). " +
       "then deterministically renders and validates understanding.md before persisting anything. " +
       "Malformed JSON is rejected; schema-invalid JSON is rejected; semantic failures are rejected with the full " +
       "error list — fix the document and resubmit. Never write understanding.json / understanding.md yourself. " +

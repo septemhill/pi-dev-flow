@@ -19,10 +19,12 @@ phase gates.
 
 The understanding phase is the only JSON-first phase: the canonical artifact
 is `understanding.json`, submitted with the `factory_understanding_submit`
-tool. The extension parses the JSON, validates it (JSON Schema + semantics:
-verbatim source prompt, change id, expected revision, status "complete",
-unique local ids, reference integrity), then deterministically renders
-`understanding.md` and validates that projection before persisting anything.
+tool. The extension parses the JSON, pins `sourcePrompt` to the recorded
+change description itself (the LLM's copy is replaced — verbatim is
+extension-guaranteed), validates it (JSON Schema + semantics: change id,
+expected revision, status "complete", unique local ids, reference integrity),
+then deterministically renders `understanding.md` and validates that
+projection before persisting anything.
 Never write or edit `understanding.json` / `understanding.md` by hand; the
 Markdown is a generated projection of the validated JSON.
 

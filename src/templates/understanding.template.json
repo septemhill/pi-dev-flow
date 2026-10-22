@@ -1,5 +1,4 @@
 {
-  "$comment": "Skeleton of the understanding artifact. Replace every <placeholder> with real content, keep all fields and their types. Submit the finished document with the factory_understanding_submit tool — never write understanding.json or understanding.md yourself.",
   "metadata": {
     "artifactType": "understanding",
     "contractVersion": "1.0.0",
@@ -8,7 +7,7 @@
     "status": "complete",
     "sourcePromptRef": "change description of <change id>"
   },
-  "sourcePrompt": "<the original prompt (change description) VERBATIM — copy it exactly from the phase prompt>",
+  "sourcePrompt": "<any non-empty text — the extension replaces this with the verbatim change description before validation>",
   "intent": {
     "objective": "<primary objective as interpreted from the prompt>",
     "expectedOutcome": "<expected end state if the objective is achieved>",
