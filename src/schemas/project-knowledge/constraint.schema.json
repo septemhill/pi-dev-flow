@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Project Constraint",
+  "description": "A project-level or scoped restriction that applicable implementations must not violate.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0.0",
+      "description": "The version of the JSON Schema contract used to validate this constraint document."
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^CON-[A-Za-z0-9-]+$",
+      "description": "A stable, unique identifier assigned and verified by the Extension. The identifier must not be changed when the document content is revised."
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "description": "A concise human-readable title describing the restriction."
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1,
+      "description": "A detailed explanation of the restriction, its purpose, and the circumstances in which it matters."
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "level": {
+          "type": "string",
+          "enum": [
+            "project",
+            "directory",
+            "module"
+          ],
+          "description": "The applicability level of the constraint. Project applies across the repository; directory and module indicate narrower scopes."
+        },
+        "paths": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "description": "A repository-relative path identifying a constrained directory or module."
+          },
+          "description": "Repository-relative paths identifying the constrained directories or modules. An empty array means that no narrower path restriction is specified."
+        }
+      },
+      "required": [
+        "level",
+        "paths"
+      ],
+      "description": "The part of the project to which the constraint applies. The Extension must additionally verify that path values are valid repository-relative paths."
+    },
+    "rule": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The normative restriction that applicable changes and implementations must satisfy."
+    },
+    "severity": {
+      "type": "string",
+      "enum": [
+        "error",
+        "warning"
+      ],
+      "description": "The severity assigned to a violation. Error indicates a blocking violation under the configured enforcement policy; warning indicates a non-blocking violation that must be reported."
+    },
+    "verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "method": {
+          "type": "string",
+          "enum": [
+            "automated",
+            "agent_review",
+            "human_review"
+          ],
+          "description": "The primary method used to determine whether the constraint is satisfied."
+        },
+        "validator": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The identifier of a configured automated validator or checking mechanism. Null is permitted when verification does not use a named automated validator."
+        },
+        "instructions": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Instructions explaining how to verify compliance, including manual review criteria when automated validation is unavailable."
+        }
+      },
+      "required": [
+        "method",
+        "validator",
+        "instructions"
+      ],
+      "description": "The verification strategy for the constraint. The Extension must verify that any non-null validator refers to an available or configured checking mechanism when automated execution is required."
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "proposed",
+        "approved",
+        "deprecated"
+      ],
+      "description": "The lifecycle status of the constraint. The Extension controls effective state transitions and must not trust an Agent-supplied approved value."
+    }
+  },
+  "required": [
+    "schema_version",
+    "id",
+    "title",
+    "description",
+    "scope",
+    "rule",
+    "severity",
+    "verification",
+    "status"
+  ]
+}

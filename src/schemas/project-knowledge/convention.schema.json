@@ -1,0 +1,140 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Project Convention",
+  "description": "A reusable development practice, coding standard, or engineering convention applicable to a project or a defined part of it.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0.0",
+      "description": "The version of the JSON Schema contract used to validate this convention document."
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^CVN-[A-Za-z0-9-]+$",
+      "description": "A stable, unique identifier assigned and verified by the Extension. The identifier remains stable across revisions of the convention."
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "description": "A concise human-readable title identifying the development convention."
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1,
+      "description": "An explanation of the convention, the development context in which it applies, and the problem it is intended to prevent or solve."
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "level": {
+          "type": "string",
+          "enum": [
+            "project",
+            "directory",
+            "module"
+          ],
+          "description": "The applicability level of the convention. Project applies across the repository; directory and module indicate narrower scopes."
+        },
+        "paths": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "description": "A repository-relative path identifying a directory or module covered by the convention."
+          },
+          "description": "Repository-relative paths identifying the directories or modules covered by the convention. An empty array means that no narrower path restriction is specified."
+        }
+      },
+      "required": [
+        "level",
+        "paths"
+      ],
+      "description": "The scope within which contributors and Agents are expected to follow the convention."
+    },
+    "practice": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The recommended or required development practice. Express the expected behavior precisely enough for implementation and review."
+    },
+    "rationale": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The reason for adopting the convention, such as maintainability, consistency, reliability, security, or compatibility."
+    },
+    "enforcement": {
+      "type": "string",
+      "enum": [
+        "automated",
+        "agent_review",
+        "human_review"
+      ],
+      "description": "The primary enforcement method. Automated means a configured tool can check compliance; agent_review requires explicit Agent inspection; human_review requires human judgment."
+    },
+    "verification_instructions": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Instructions describing how to check adherence, including the relevant tooling, review criteria, or expected evidence."
+    },
+    "examples": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "positive",
+              "negative"
+            ],
+            "description": "Whether the example demonstrates compliant behavior or behavior that violates the convention."
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "description": "An explanation of what the example demonstrates and why it is compliant or non-compliant."
+          },
+          "code": {
+            "type": "string",
+            "minLength": 1,
+            "description": "A representative code snippet or textual example illustrating the convention."
+          }
+        },
+        "required": [
+          "kind",
+          "description",
+          "code"
+        ],
+        "description": "A positive or negative example that clarifies the expected development practice."
+      },
+      "description": "Examples used by Agents and developers to understand and review the convention. An empty array is permitted when no meaningful example is available."
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "proposed",
+        "approved",
+        "deprecated"
+      ],
+      "description": "The lifecycle status of the convention. The Extension controls approval and status transitions; an Agent cannot authorize a convention merely by setting this field."
+    }
+  },
+  "required": [
+    "schema_version",
+    "id",
+    "title",
+    "description",
+    "scope",
+    "practice",
+    "rationale",
+    "enforcement",
+    "verification_instructions",
+    "examples",
+    "status"
+  ]
+}

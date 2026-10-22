@@ -34,12 +34,38 @@ type Ajv2020Ctor = new (opts?: { allErrors?: boolean; strict?: boolean; validate
 const Ajv2020 = Ajv2020Default as unknown as Ajv2020Ctor;
 const addFormats = addFormatsDefault as unknown as (ajv: unknown, opts?: { modes?: string[] }) => void;
 
-interface CompileEntry {
+export interface CompileEntry {
   fn: AjvValidate;
   errors: ErrorObject[] | null;
 }
 
 const compiled = new Map<string, CompileEntry>();
+
+/**
+ * Generic Draft 2020-12 compile used by both the artifact contract pipeline and
+ * the Project Knowledge schemas. Fail closed: a missing/broken schema is a
+ * CONTRACT_ERROR, never a skipped validation.
+ */
+export function compileSchema2020(schema: unknown, label: string): CompileEntry {
+  const ajv = new Ajv2020({ allErrors: true, strict: true, validateFormats: true });
+  addFormats(ajv, { modes: ["fast"] });
+  if ((schema as { $schema?: string }).$schema !== SCHEMA_DRAFT) {
+    throw new WorkflowError(
+      "CONTRACT_ERROR",
+      `Schema ${label} declares draft ${(schema as { $schema?: string }).$schema ?? "none"}; the factory pins draft ${SCHEMA_DRAFT}. Validation is refused.`,
+    );
+  }
+  let fn: AjvValidate;
+  try {
+    fn = ajv.compile(schema);
+  } catch (e) {
+    throw new WorkflowError(
+      "CONTRACT_ERROR",
+      `Schema ${label} does not compile under draft ${SCHEMA_DRAFT}: ${e instanceof Error ? e.message : e}. Validation is refused.`,
+    );
+  }
+  return { fn, errors: null };
+}
 
 export function schemasDir(): string {
   return path.join(extensionDir(), "schemas");
@@ -67,24 +93,7 @@ export function getSchema(contract: ArtifactContract, dir?: string): CompileEntr
       `Artifact schema ${file} is not valid JSON: ${e instanceof Error ? e.message : e}. Validation is refused.`,
     );
   }
-  const ajv = new Ajv2020({ allErrors: true, strict: true, validateFormats: true });
-  addFormats(ajv, { modes: ["fast"] });
-  if ((schema as { $schema?: string }).$schema !== SCHEMA_DRAFT) {
-    throw new WorkflowError(
-      "CONTRACT_ERROR",
-      `Artifact schema ${file} declares draft ${(schema as { $schema?: string }).$schema ?? "none"}; the factory pins draft ${SCHEMA_DRAFT}. Validation is refused.`,
-    );
-  }
-  let fn: (data: unknown) => boolean;
-  try {
-    fn = ajv.compile(schema) as (data: unknown) => boolean;
-  } catch (e) {
-    throw new WorkflowError(
-      "CONTRACT_ERROR",
-      `Artifact schema ${file} does not compile under draft ${SCHEMA_DRAFT}: ${e instanceof Error ? e.message : e}. Validation is refused.`,
-    );
-  }
-  const entry: CompileEntry = { fn, errors: null };
+  const entry = compileSchema2020(schema, `artifact schema ${file}`);
   compiled.set(cacheKey, entry);
   return entry;
 }

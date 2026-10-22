@@ -51,6 +51,7 @@ import type {
   WorkflowSnapshot,
 } from "./workflow/state.ts";
 import { buildChangeTrace, renderTraceabilityReport } from "./traceability/report.ts";
+import { KnowledgeManager } from "./knowledge/manager.ts";
 
 export interface NewTaskInput {
   title: string;
@@ -76,6 +77,14 @@ export class FactoryEngine {
   db: Database;
   /** Result of the most recent full artifact validation (set by validatePhaseContract / validateActivePhase). */
   private lastValidation: { phase: Phase; result: ArtifactValidationResult } | null = null;
+  /** Project Knowledge authority (lazy). */
+  private _knowledge: KnowledgeManager | null = null;
+
+  /** Project Knowledge manager: canonical JSON store, validation, lifecycle, rendering. */
+  get knowledge(): KnowledgeManager {
+    if (!this._knowledge) this._knowledge = new KnowledgeManager(this.root, this.db);
+    return this._knowledge;
+  }
 
   constructor(root: string) {
     this.root = root;

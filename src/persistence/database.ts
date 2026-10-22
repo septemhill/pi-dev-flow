@@ -113,6 +113,14 @@ CREATE TABLE IF NOT EXISTS waivers (
   created_at TEXT NOT NULL,
   UNIQUE (change_id, item_id, stage, id)
 );
+CREATE TABLE IF NOT EXISTS knowledge_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  knowledge_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  change_id TEXT,
+  detail TEXT,
+  created_at TEXT NOT NULL
+);
 `;
 
 function asPhase(v: string): Phase {
@@ -574,5 +582,25 @@ export class Database {
   getWaiver(id: string): WaiverRecord | null {
     const r = this.db.prepare("SELECT * FROM waivers WHERE id = ?").get(id);
     return r ? mapWaiver(r as Record<string, unknown>) : null;
+  }
+
+  // ---- knowledge events (Project Knowledge audit log; project-level, no workflow row) ----
+
+  insertKnowledgeEvent(knowledgeId: string, kind: string, changeId: string | null, detail: string | null, at: string): void {
+    this.db
+      .prepare("INSERT INTO knowledge_events (knowledge_id, kind, change_id, detail, created_at) VALUES (?, ?, ?, ?, ?)")
+      .run(knowledgeId, kind, changeId, detail, at);
+  }
+
+  listKnowledgeEvents(knowledgeId: string, limit = 10): Array<{ kind: string; changeId: string | null; detail: string | null; createdAt: string }> {
+    const rows = this.db
+      .prepare("SELECT kind, change_id AS changeId, detail, created_at AS createdAt FROM knowledge_events WHERE knowledge_id = ? ORDER BY id DESC LIMIT ?")
+      .all(knowledgeId, limit);
+    return (rows as Array<Record<string, unknown>>).map((o) => ({
+      kind: o.kind as string,
+      changeId: (o.changeId as string | null) ?? null,
+      detail: (o.detail as string | null) ?? null,
+      createdAt: o.createdAt as string,
+    }));
   }
 }

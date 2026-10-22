@@ -10,7 +10,8 @@
  *   - one command:  /factory (init | status | run | approve | reject | resume | tasks | changes)
  *   - restricted tools the phase LLM may call (never full state control):
  *       factory_phase_complete, factory_requirement_append, factory_set_task_plan,
- *       factory_task_update, factory_check_record, factory_report_failure
+ *       factory_task_update, factory_check_record, factory_report_failure,
+ *       factory_knowledge_draft
  *
  * The LLM proposes content; this extension enforces the workflow state machine,
  * artifact contracts, hashes, and human approval gates. See README.md.
@@ -72,7 +73,7 @@ export default function factoryExtension(pi: ExtensionAPI) {
 
   pi.registerCommand("factory", {
     description:
-      "AI Software Factory: /factory init|status|run|approve|reject|resume|tasks|changes",
+      "AI Software Factory: /factory init|status|run|approve|reject|resume|tasks|changes|knowledge",
     handler: async (args, ctx) => {
       await handleFactory(args, ctx, deps);
       try {
@@ -226,6 +227,56 @@ export default function factoryExtension(pi: ExtensionAPI) {
         refreshWidget(engine, ctx.ui);
         return ok(
           `Workflow marked FAILED (${params.reason}). The human operator runs /factory resume to recover, then /factory run.`,
+        );
+      } catch (e) {
+        return fail(describeError(e));
+      }
+    },
+  });
+
+  pi.registerTool({
+    name: "factory_knowledge_draft",
+    label: "Factory: draft project knowledge",
+    description:
+      "Submit ONE Project Knowledge draft (Constraint, Convention or Tech Decision) as a JSON document. The extension " +
+      "validates it against the pinned JSON Schema, runs semantic checks (duplicate ids, scope, references), FORCES its " +
+      "status to 'draft' (you cannot self-approve), allocates or verifies the identifier, persists the canonical JSON, and " +
+      "renders the Markdown. Returns the rendered draft. The record only becomes effective when a human runs " +
+      "/factory knowledge approve <id>. Call it once per independent candidate. Unrecognized/invalid content is rejected " +
+      "with an actionable error list; nothing is persisted in that case.",
+    parameters: Type.Object({
+      type: Type.Union([
+        Type.Literal("constraint"),
+        Type.Literal("convention"),
+        Type.Literal("tech-decision"),
+      ]),
+      document: Type.Record(Type.Unknown(), {
+        description:
+          "The knowledge document as a JSON object conforming to the pinned schema for `type` " +
+          "(see the extension's src/schemas/project-knowledge/). Do not set 'status' (it is forced to 'draft') and do not " +
+          "invent an 'id' unless you are revising a draft the extension already showed you.",
+      }),
+      change_id: Type.Optional(Type.String({ description: "Source change id for traceability, if the candidate came from an active change" })),
+      requirement_ref: Type.Optional(Type.String({ description: "Source requirement history entry (e.g. 'R3'), if any" })),
+    }),
+    async execute(_id, params, _signal, _onUpdate, ctx) {
+      try {
+        const engine = engineFor(ctx.cwd);
+        const r = engine.knowledge.createDraft(params.type, params.document, {
+          changeId: params.change_id ?? null,
+          requirementRef: params.requirement_ref ?? null,
+          source: "agent-tool",
+        });
+        return ok(
+          [``,
+            `Project Knowledge DRAFT ${r.revised ? "revised" : "created"}: ${r.id} (${r.type}).` +
+              (r.statusForcedFrom ? ` (your status "${r.statusForcedFrom}" was discarded; records enter as "draft".)` : ""),
+            `Canonical JSON: ${r.jsonRel}`, `Generated Markdown: ${r.mdRel}`,
+            "", "--- rendered draft ---", r.markdown, "--- end draft ---",
+            "This is a DRAFT: it is NOT effective yet. Show it to the user and tell them to run",
+            `  /factory knowledge approve ${r.id}   to make it effective,`,
+            "or  /factory knowledge show " + r.id + "  to inspect it. Never claim it is approved.",
+          ].join("\n"),
         );
       } catch (e) {
         return fail(describeError(e));

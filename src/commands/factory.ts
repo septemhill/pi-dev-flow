@@ -3,6 +3,7 @@ import { describeError } from "../workflow/errors.ts";
 import { PHASES, PHASE_ARTIFACT_FILE, nextPhase } from "../workflow/phases.ts";
 import { buildPhasePrompt } from "../execution/phase-executor.ts";
 import { formatValidationResult } from "../artifacts/artifact-validator.ts";
+import { handleKnowledge } from "./knowledge.ts";
 import type { WorkflowSnapshot, CoverageStageName } from "../workflow/state.ts";
 
 /**
@@ -21,6 +22,7 @@ import type { WorkflowSnapshot, CoverageStageName } from "../workflow/state.ts";
  *   /factory traceability
  *   /factory waive <item-id> <stage> <rationale...>
  *   /factory revoke-waiver <waiver-id>
+ *   /factory knowledge <add|list|show|validate|approve|reject|deprecate|regenerate> …
  *
  * `sendPhasePrompt` is the only pi-runtime hook (pi.sendUserMessage);
  * everything else is engine code and stays unit-testable.
@@ -94,6 +96,9 @@ export async function handleFactory(
       case "revoke-waiver":
         doRevokeWaiver(ctx, deps, restStr);
         break;
+      case "knowledge":
+        await handleKnowledge(restStr, ctx, deps);
+        break;
       default:
         show(ctx, [`Unknown subcommand "${sub}".`, ...usage()]);
     }
@@ -161,6 +166,8 @@ async function doRun(ctx: CommandCtxLike, deps: FactoryDeps): Promise<void> {
     checks: s.checks,
     restarted: !started,
     repoRoot: ctx.cwd,
+    projectKnowledge:
+      w.current_phase === "requirement" ? engine.knowledge.summaryForPrompt() || "(none yet)" : undefined,
   });
   deps.sendPhasePrompt(prompt);
   engine.notePromptSent(started ? "phase prompt sent to agent" : "re-prompt (possible interruption)");
@@ -310,6 +317,7 @@ function usage(): string[] {
     "  /factory traceability         show the coverage report: stages, uncovered items, waivers, stale refs",
     "  /factory waive <id> <stage> <rationale>   record an explicit, auditable coverage waiver",
     "  /factory revoke-waiver <id>   revoke an active waiver",
+    "  /factory knowledge …           manage Project Knowledge (add|list|show|validate|approve|reject|deprecate|regenerate)",
   ];
 }
 

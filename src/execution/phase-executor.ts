@@ -10,6 +10,7 @@ import { phaseTemplate } from "../prompts.ts";
 import { getContract } from "../artifacts/artifact-registry.ts";
 import { loadTemplate } from "../artifacts/template-loader.ts";
 import { changeFile, readFileOrNull, sha256 } from "../artifacts/artifact-store.ts";
+import { buildKnowledgeDiscoverySection } from "../knowledge/prompt.ts";
 
 /**
  * Builds the user-message prompt that drives one phase execution.
@@ -27,6 +28,12 @@ export interface PromptContext {
   restarted: boolean;
   repoRoot: string;
   promptsDir?: string;
+  /**
+   * Summary lines of existing Project Knowledge for the requirement phase
+   * (candidate discovery). Instructions only — discovery never moves the
+   * workflow, and only the extension can persist/approve knowledge.
+   */
+  projectKnowledge?: string;
 }
 
 const PHASE_CONTRACT_EXTRA: Record<Phase, string> = {
@@ -121,6 +128,13 @@ export function buildPhasePrompt(ctx: PromptContext): string {
   }
 
   sections.push(phaseTemplate(phase, ctx.promptsDir).trim());
+
+  // Requirement phase only: Project Knowledge candidate discovery (the
+  // original user prompt is analyzed here; nothing is persisted without the
+  // extension-managed draft tool and the human approval gate).
+  if (phase === "requirement" && ctx.projectKnowledge !== undefined) {
+    sections.push(buildKnowledgeDiscoverySection(ctx.projectKnowledge, w.change_id));
+  }
 
   // The pinned artifact contract: template + validation rules + expected revision
   // + upstream pins. All values come from persisted state, never the conversation.

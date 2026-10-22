@@ -1,0 +1,136 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Project Technology Decision",
+  "description": "An explicit technology, architecture, or engineering decision with documented context, rationale, alternatives, and consequences.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0.0",
+      "description": "The version of the JSON Schema contract used to validate this technology decision document."
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^ADR-[A-Za-z0-9-]+$",
+      "description": "A stable, unique identifier assigned and verified by the Extension. The identifier remains unchanged when the same decision record is revised."
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "description": "A concise title describing the technology or architecture decision."
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "level": {
+          "type": "string",
+          "enum": [
+            "project",
+            "directory",
+            "module"
+          ],
+          "description": "The applicability level of the decision. Project applies across the repository; directory and module indicate narrower scopes."
+        },
+        "paths": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "description": "A repository-relative path identifying a directory or module governed by the decision."
+          },
+          "description": "Repository-relative paths identifying the directories or modules governed by the decision. An empty array means that no narrower path restriction is specified."
+        }
+      },
+      "required": [
+        "level",
+        "paths"
+      ],
+      "description": "The part of the project to which the decision applies."
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "proposed",
+        "accepted",
+        "rejected",
+        "superseded",
+        "withdrawn"
+      ],
+      "description": "The lifecycle status of the decision. Accepted means formally approved; superseded means replaced by a later accepted decision; withdrawn means withdrawn without necessarily having a replacement. The Extension must enforce all transitions."
+    },
+    "context": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The problem, constraints, existing architecture, and circumstances that make a decision necessary."
+    },
+    "decision": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The specific technology, architecture, library, framework, or engineering approach selected."
+    },
+    "rationale": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The reasons for selecting the chosen approach, including relevant trade-offs and how it addresses the documented context."
+    },
+    "alternatives": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "option": {
+            "type": "string",
+            "minLength": 1,
+            "description": "An alternative technology or approach considered during decision-making."
+          },
+          "reason_not_selected": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The reason the alternative was not selected, including any relevant disadvantages or unmet requirements."
+          }
+        },
+        "required": [
+          "option",
+          "reason_not_selected"
+        ],
+        "description": "A considered alternative and the reason it was not selected."
+      },
+      "description": "The alternatives considered during the decision process. An empty array is permitted when no alternatives were evaluated or documented."
+    },
+    "consequences": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "description": "One expected benefit, limitation, cost, migration requirement, or operational effect of the decision."
+      },
+      "description": "The expected benefits, limitations, costs, migration requirements, operational effects, and other consequences of the decision. An empty array is permitted only when no consequences have been documented."
+    },
+    "supersedes": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^ADR-[A-Za-z0-9-]+$",
+      "description": "The identifier of a previous technology decision replaced by this decision. Null means that the decision does not explicitly replace another decision. The Extension must verify that a referenced record exists, has a compatible type, and can legally be superseded."
+    }
+  },
+  "required": [
+    "schema_version",
+    "id",
+    "title",
+    "scope",
+    "status",
+    "context",
+    "decision",
+    "rationale",
+    "alternatives",
+    "consequences",
+    "supersedes"
+  ]
+}
