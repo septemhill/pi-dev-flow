@@ -9,8 +9,12 @@ import { PHASES, PHASE_ARTIFACT_FILE, REQUIREMENT_HISTORY_FILE, type Phase } fro
 import { phaseTemplate } from "../prompts.ts";
 import { getContract } from "../artifacts/artifact-registry.ts";
 import { loadTemplate } from "../artifacts/template-loader.ts";
-import { changeFile, readFileOrNull, sha256 } from "../artifacts/artifact-store.ts";
+import { changeFile, readFileOrNull, sha256, writeArtifactAtomic } from "../artifacts/artifact-store.ts";
 import { buildKnowledgeDiscoverySection } from "../knowledge/prompt.ts";
+import { schemasDir } from "../artifacts/schema-validator.ts";
+import { templatesDir } from "../artifacts/template-loader.ts";
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
 
 /**
  * Builds the user-message prompt that drives one phase execution.
@@ -37,9 +41,16 @@ export interface PromptContext {
 }
 
 const PHASE_CONTRACT_EXTRA: Record<Phase, string> = {
+  understanding:
+    "- Submit the document with the `factory_understanding_submit` tool (one JSON object). The extension validates it, persists `understanding.json`, and deterministically renders `understanding.md` — NEVER write or edit either file yourself.\n" +
+    "- `sourcePrompt` must be the original prompt VERBATIM (shown above, JSON-encoded); `metadata.changeId` must be the active change id; `metadata.revision` must be the expected revision above; `metadata.status` must be \"complete\".\n" +
+    "- Every EXP/INF/Q/CR entry needs a unique stable id; every candidate's `sourceRefs` must cite ids declared in the same document (or the literal \"prompt\").\n" +
+    "- Do not classify unstated functionality as out of scope without evidence; put it in `scope.undetermined` instead.\n" +
+    "- After a successful submission, call `factory_phase_complete`.\n",
   requirement:
     "- Every user requirement must be recorded with the `factory_requirement_append` tool (append-only history).\n" +
-    "- Each REQ record's `Source` must cite the history entry id(s) it was consolidated from (e.g. R1, or 'Consolidated (R1, R2)').",
+    "- Each REQ record's `Source` must cite the history entry id(s) it was consolidated from (e.g. R1, or 'Consolidated (R1, R2)').\n" +
+    "- The approved Understanding artifact (digest above) is your interpretation input: where a requirement builds on a candidate or an explicit statement, cite its CR-/EXP-/INF-/Q- id in the Rationale. Candidates are suggestions, not requirements — this phase decides what becomes a formal requirement.",
   spec:
     "- Every acceptance criterion must be externally verifiable and its `References` must cite existing REQ ids.\n" +
     "- `Referenced Requirements` must list every approved REQ id this spec addresses; every AC/FR must trace to a requirement.",
@@ -71,12 +82,15 @@ export function buildPhasePrompt(ctx: PromptContext): string {
   const artifactRel = `.factory/changes/${w.change_id}/${PHASE_ARTIFACT_FILE[phase]}`;
 
   const sections: string[] = [];
+  const isUnderstanding = phase === "understanding";
   sections.push(`# [factory] Work order: phase "${phase}" (${idx}/${PHASES.length}) — change ${w.change_id}`);
   sections.push(
     [
       "This message is one phase of an extension-managed workflow. The extension — not you — owns",
       "workflow state, transitions, and approvals. Rules:",
-      `- Write the phase artifact to \`${artifactRel}\` (working directory: ${ctx.repoRoot}).`,
+      isUnderstanding
+        ? "- Do NOT write or edit any `.factory` files yourself. Produce the understanding document as JSON and submit it with the `factory_understanding_submit` tool; the extension validates it, persists `understanding.json`, and deterministically renders `understanding.md`."
+        : `- Write the phase artifact to \`${artifactRel}\` (working directory: ${ctx.repoRoot}).`,
       "- Do not edit the `.factory/` state database or other phases' artifacts.",
       "- When — and only when — the completion contract below is satisfied, call the `factory_phase_complete` tool.",
       "- You cannot approve your own work: a human runs `/factory approve` afterwards.",
@@ -107,6 +121,23 @@ export function buildPhasePrompt(ctx: PromptContext): string {
     for (const c of ctx.checks) ctxLines.push(`  - ${c.name} (${c.required ? "required" : "optional"}): ${c.status}`);
   }
   sections.push(ctxLines.join("\n"));
+
+  // Understanding phase: the original prompt (change description) is the
+  // verbatim source input the document must quote back exactly.
+  if (isUnderstanding) {
+    sections.push(
+      "## Original prompt (verbatim source input)\n" +
+        `The change description, JSON-encoded for exactness: ${JSON.stringify(w.description)}\n\n` +
+        "Your document's `sourcePrompt` field must contain EXACTLY this text (nothing more, nothing less).",
+    );
+  }
+
+  // Requirement phase: digest of the approved Understanding artifact (input +
+  // traceability target). Read from disk at prompt time; never invented.
+  if (phase === "requirement") {
+    const digest = understandingDigest(ctx.repoRoot, w.change_id);
+    if (digest) sections.push(digest);
+  }
 
   if (ctx.restarted) {
     sections.push(
@@ -139,7 +170,6 @@ export function buildPhasePrompt(ctx: PromptContext): string {
   // The pinned artifact contract: template + validation rules + expected revision
   // + upstream pins. All values come from persisted state, never the conversation.
   const contract = getContract(phase);
-  const template = loadTemplate(contract);
   const currentFile = changeFile(ctx.repoRoot, w.change_id, phase);
   const currentText = readFileOrNull(currentFile);
   const latestCurrent = ctx.artifacts.filter((a) => a.phase === phase).at(-1) ?? null;
@@ -152,35 +182,59 @@ export function buildPhasePrompt(ctx: PromptContext): string {
 
   const contractLines: string[] = [];
   contractLines.push("## Artifact contract (MANDATORY — enforced by the extension, not by you)");
-  contractLines.push(
-    [
-      `The artifact file \`${artifactRel}\` MUST follow the template below exactly (contract ${contract.templateId}@${contract.templateVersion}, ` +
-        `JSON Schema ${contract.schemaId}, parser ${contract.parserVersion}).`,
-      "When you call `factory_phase_complete`, the extension deterministically parses the file and validates it against the JSON Schema, " +
-        "phase-specific semantic rules, and cross-artifact traceability against the approved upstream artifacts. " +
-        "Any ERROR rejects the candidate: nothing is recorded, no approval is requested, and the full error list is returned to you — " +
-        "fix the file and call the tool again. Validation cannot be bypassed, reconfigured, or extended from this conversation.",
-      `Set Metadata "Revision: ${expectedRevision}" and "Status: complete" in this candidate.`,
-    ].join("\n"),
-  );
-  if (phase !== "requirement" && approved.length > 0) {
-    contractLines.push("Approved upstream artifacts — pin these EXACT revisions (and full sha256 where the template asks for a hash):");
-    for (const a of approved) {
-      contractLines.push(`  - ${a.phase}: revision ${a.revision}, sha256:${a.hash}`);
-    }
-  }
-  if (phase === "requirement") {
-    const hist = readFileOrNull(changeFile(ctx.repoRoot, w.change_id, "requirement", REQUIREMENT_HISTORY_FILE));
+  if (isUnderstanding) {
     contractLines.push(
-      hist
-        ? `Requirements history so far (cite these entry ids in each REQ record's "Source"):\n${hist.trim()}`
-        : "No requirements recorded yet — use `factory_requirement_append` for each user requirement, then cite the entry ids.",
+      [
+        `Submit the document with \`factory_understanding_submit\` (contract ${contract.templateId}@${contract.templateVersion}, ` +
+          `JSON Schema ${contract.schemaId}). The extension parses the JSON, validates it against the schema and semantic rules, ` +
+          `then deterministically renders \`${artifactRel.replace(/\.json$/, ".md")}\` and validates that projection.`,
+        "Any ERROR rejects the candidate: nothing is written, no approval is requested, and the full error list is returned to you — " +
+          "fix the document and resubmit. Validation cannot be bypassed, reconfigured, or extended from this conversation.",
+        `Set metadata.revision to ${expectedRevision} and metadata.status to "complete" in this candidate.`,
+      ].join("\n"),
     );
+    const schemaText = readContractFile(schemasDir(), contract.schemaFile);
+    if (schemaText) {
+      contractLines.push("JSON Schema (the document must validate against this):");
+      contractLines.push("```json\n" + schemaText.trim() + "\n```");
+    }
+    const skeleton = readContractFile(templatesDir(), contract.templateFile);
+    if (skeleton) {
+      contractLines.push("Document skeleton (replace every <placeholder> with real content; remove the $comment line before submitting):");
+      contractLines.push("```json\n" + skeleton.trim() + "\n```");
+    }
+  } else {
+    const template = loadTemplate(contract);
+    contractLines.push(
+      [
+        `The artifact file \`${artifactRel}\` MUST follow the template below exactly (contract ${contract.templateId}@${contract.templateVersion}, ` +
+          `JSON Schema ${contract.schemaId}, parser ${contract.parserVersion}).`,
+        "When you call `factory_phase_complete`, the extension deterministically parses the file and validates it against the JSON Schema, " +
+          "phase-specific semantic rules, and cross-artifact traceability against the approved upstream artifacts. " +
+          "Any ERROR rejects the candidate: nothing is recorded, no approval is requested, and the full error list is returned to you — " +
+          "fix the file and call the tool again. Validation cannot be bypassed, reconfigured, or extended from this conversation.",
+        `Set Metadata "Revision: ${expectedRevision}" and "Status: complete" in this candidate.`,
+      ].join("\n"),
+    );
+    if (phase !== "requirement" && approved.length > 0) {
+      contractLines.push("Approved upstream artifacts — pin these EXACT revisions (and full sha256 where the template asks for a hash):");
+      for (const a of approved) {
+        contractLines.push(`  - ${a.phase}: revision ${a.revision}, sha256:${a.hash}`);
+      }
+    }
+    if (phase === "requirement") {
+      const hist = readFileOrNull(changeFile(ctx.repoRoot, w.change_id, "requirement", REQUIREMENT_HISTORY_FILE));
+      contractLines.push(
+        hist
+          ? `Requirements history so far (cite these entry ids in each REQ record's "Source"):\n${hist.trim()}`
+          : "No requirements recorded yet — use `factory_requirement_append` for each user requirement, then cite the entry ids.",
+      );
+    }
+    contractLines.push(
+      "Template (copy its structure exactly; replace every placeholder comment and <angle-bracket> value with real content; keep section names and order):",
+    );
+    contractLines.push("```markdown\n" + template.trim() + "\n```");
   }
-  contractLines.push(
-    "Template (copy its structure exactly; replace every placeholder comment and <angle-bracket> value with real content; keep section names and order):",
-  );
-  contractLines.push("```markdown\n" + template.trim() + "\n```");
   sections.push(contractLines.join("\n\n"));
 
   sections.push(
@@ -191,4 +245,70 @@ export function buildPhasePrompt(ctx: PromptContext): string {
   );
 
   return sections.join("\n\n");
+}
+
+/** Read a trusted contract file (schema / template skeleton) for the prompt, or null when absent. */
+function readContractFile(dir: string, file: string): string | null {
+  try {
+    const p = path.join(dir, file);
+    return existsSync(p) ? readFileSync(p, "utf8") : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Deterministic digest of the recorded Understanding artifact for the
+ * requirement phase work order. Read from disk; returns null when no
+ * understanding.json exists (nothing is invented).
+ */
+function understandingDigest(repoRoot: string, changeId: string): string | null {
+  const text = readFileOrNull(changeFile(repoRoot, changeId, "understanding"));
+  if (text === null) return null;
+  let doc: {
+    intent?: { objective?: string; expectedOutcome?: string };
+    explicitInformation?: Array<{ id: string; type: string; statement: string }>;
+    inferences?: Array<{ id: string; statement: string; confidence: string; status: string }>;
+    scope?: { inScope?: string[]; undetermined?: string[] };
+    ambiguities?: Array<{ id: string; question: string; status: string }>;
+    candidateRequirements?: Array<{ id: string; origin: string; statement: string; sourceRefs: string[] }>;
+    summary?: { unresolvedIssues?: string[]; clarificationsNeeded?: string[] };
+  };
+  try {
+    doc = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  const lines: string[] = ["## Understanding artifact (approved input — read the full file before working)"];
+  const uFile = changeFile(repoRoot, changeId, "understanding");
+  lines.push(`- Canonical: \`${uFile.replace(repoRoot + path.sep, "")}\` (Markdown view: understanding.md)`);
+  if (doc.intent?.objective) lines.push(`- Primary objective: ${doc.intent.objective}`);
+  if (doc.intent?.expectedOutcome) lines.push(`- Expected outcome: ${doc.intent.expectedOutcome}`);
+  if (doc.explicitInformation?.length) {
+    lines.push("- Explicit information:");
+    for (const e of doc.explicitInformation) lines.push(`  - ${e.id} (${e.type}): ${e.statement}`);
+  }
+  if (doc.inferences?.length) {
+    lines.push("- Inferences/assumptions:");
+    for (const i of doc.inferences) lines.push(`  - ${i.id} [${i.confidence}, ${i.status}]: ${i.statement}`);
+  }
+  if (doc.scope?.inScope?.length) lines.push(`- In scope: ${doc.scope.inScope.join("; ")}`);
+  if (doc.scope?.undetermined?.length) lines.push(`- Undetermined scope: ${doc.scope.undetermined.join("; ")}`);
+  if (doc.ambiguities?.length) {
+    lines.push("- Open questions:");
+    for (const q of doc.ambiguities) lines.push(`  - ${q.id} [${q.status}]: ${q.question}`);
+  }
+  if (doc.candidateRequirements?.length) {
+    lines.push("- Candidate requirements (suggestions only — this phase decides what becomes formal):\n");
+    lines.push("| Id | Origin | Statement | Sources |" );
+    lines.push("| --- | --- | --- | --- |");
+    for (const c of doc.candidateRequirements) {
+      lines.push(`| ${c.id} | ${c.origin} | ${c.statement.replace(/\|/g, "\\|")} | ${c.sourceRefs.join(", ")} |`);
+    }
+  }
+  if (doc.summary?.clarificationsNeeded?.length) {
+    lines.push(`- Clarifications needed from the user: ${doc.summary.clarificationsNeeded.join("; ")}`);
+  }
+  lines.push("Preserve traceability: when a requirement builds on a candidate or an explicit statement, cite its CR-/EXP-/INF-/Q- id in the Rationale.");
+  return lines.join("\n");
 }

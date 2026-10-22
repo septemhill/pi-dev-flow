@@ -40,20 +40,21 @@ function eng(root: string): Engine {
   return e;
 }
 
-/** Start + complete the requirement phase, leaving a PENDING approval. */
+/** Complete understanding, then start + complete the requirement phase, leaving a PENDING approval. */
 function pendingRequirementApproval(root: string): void {
   const engine = eng(root);
+  advanceTo(root, engine, "requirement");
   engine.beginCurrentPhase();
   engine.appendRequirement("test requirement");
   writeChangeFile(root, engine.requireActive().change_id, "requirement.md", makeArtifact("requirement", engine));
   engine.completeCurrentPhase();
 }
 
-test("1. a new change starts at requirement, status IDLE", () => {
+test("1. a new change starts at understanding, status IDLE", () => {
   const root = makeRoot();
   const engine = eng(root);
   const w = engine.initChange("add a cool feature");
-  assert.equal(w.current_phase, "requirement");
+  assert.equal(w.current_phase, "understanding");
   assert.equal(w.status, "IDLE");
   assert.match(w.change_id, /^chg-/);
   // repeated init must NOT silently replace the active change
@@ -62,17 +63,17 @@ test("1. a new change starts at requirement, status IDLE", () => {
   cleanup(root);
 });
 
-test("2. the six phases follow the required order", () => {
+test("2. the seven phases follow the required order", () => {
   const root = makeRoot();
   const engine = eng(root);
   engine.initChange("order test");
   const seen: string[] = [];
-  for (const expected of ["requirement", "spec", "design", "task_planning", "implementation", "verification"] as const) {
+  for (const expected of ["understanding", "requirement", "spec", "design", "task_planning", "implementation", "verification"] as const) {
     assert.equal(engine.requireActive().current_phase, expected, `expected to be on ${expected}`);
     seen.push(expected);
     completePhase(root, engine, expected);
   }
-  assert.deepEqual(seen, ["requirement", "spec", "design", "task_planning", "implementation", "verification"]);
+  assert.deepEqual(seen, ["understanding", "requirement", "spec", "design", "task_planning", "implementation", "verification"]);
   assert.equal(engine.getActiveWorkflow(), null, "no active workflow after completion");
   assert.equal(engine.getWorkflow(engine.listWorkflows()[0].change_id)!.status, "COMPLETED");
   cleanup(root);
@@ -157,6 +158,7 @@ test("10. workflow state survives reloading from persistence", () => {
   const root = makeRoot();
   const e1 = newEngine(root);
   e1.initChange("survive reload");
+  completePhase(root, e1, "understanding");
   completePhase(root, e1, "requirement");
   const changeId = e1.requireActive().change_id;
   e1.close();
@@ -238,6 +240,7 @@ test("end-to-end: full workflow reaches COMPLETED with exactly one APPROVED appr
     { phase: "requirement", status: "APPROVED", c: 1 },
     { phase: "spec", status: "APPROVED", c: 1 },
     { phase: "task_planning", status: "APPROVED", c: 1 },
+    { phase: "understanding", status: "APPROVED", c: 1 },
     { phase: "verification", status: "APPROVED", c: 1 },
   ]);
   // a completed workflow is no longer active and cannot be driven further

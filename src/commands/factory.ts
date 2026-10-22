@@ -115,9 +115,9 @@ function doInit(ctx: CommandCtxLike, deps: FactoryDeps, description: string): vo
   const w = engine.initChange(description);
   show(ctx, [
     `Change created: ${w.change_id}`,
-    `Phase: requirement (1/${PHASES.length})  Status: IDLE`,
-    `Artifact dir: .factory/changes/${w.change_id}/`,
-    "Next: /factory run   (executes the requirement phase)",
+    `Phase: understanding (1/${PHASES.length})  Status: IDLE`,
+    `Artifact: .factory/changes/${w.change_id}/understanding.json (+ generated understanding.md)`,
+    "Next: /factory run   (executes the understanding phase)",
   ]);
 }
 
@@ -187,7 +187,7 @@ function doApprove(ctx: CommandCtxLike, deps: FactoryDeps, comment: string): voi
     `Approved phase "${approval.phase}" (${approval.id}).`,
     next
       ? `Workflow advanced to phase "${next}" (status IDLE). Run it explicitly with: /factory run`
-      : "All six phases approved — the workflow is COMPLETED.",
+      : "All phases approved — the workflow is COMPLETED.",
     "Note: the next phase does NOT auto-execute; run it with /factory run.",
   ]);
 }
@@ -305,7 +305,7 @@ function doRevokeWaiver(ctx: CommandCtxLike, deps: FactoryDeps, rest: string): v
 function usage(): string[] {
   return [
     "Factory commands:",
-    "  /factory init <description>   create a new change (starts at requirement)",
+    "  /factory init <description>   create a new change (starts at understanding)",
     "  /factory status               show phase, status, artifact, approval, tasks",
     "  /factory run                  execute/resume the current phase (never bypasses approvals)",
     "  /factory approve [comment]    approve the pending phase artifact (human gate)",

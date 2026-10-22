@@ -9,7 +9,7 @@
  * Registers:
  *   - one command:  /factory (init | status | run | approve | reject | resume | tasks | changes)
  *   - restricted tools the phase LLM may call (never full state control):
- *       factory_phase_complete, factory_requirement_append, factory_set_task_plan,
+ *       factory_phase_complete, factory_understanding_submit, factory_requirement_append, factory_set_task_plan,
  *       factory_task_update, factory_check_record, factory_report_failure,
  *       factory_knowledge_draft
  *
@@ -108,6 +108,35 @@ export default function factoryExtension(pi: ExtensionAPI) {
             `Artifact: ${artifact.path} (revision ${artifact.revision}, sha256:${artifact.hash.slice(0, 16)}…)\n` +
             `Approval ${approval.id} is PENDING — the workflow is paused. A human must run /factory approve [comment] ` +
             `or /factory reject <reason>. Do not continue to later-phase work.`,
+        );
+      } catch (e) {
+        return fail(describeError(e));
+      }
+    },
+  });
+
+  pi.registerTool({
+    name: "factory_understanding_submit",
+    label: "Factory: submit understanding",
+    description:
+      "Submit the understanding document (JSON-first artifact generation, understanding phase only). " +
+      "The extension parses the JSON, validates it against the pinned JSON Schema and semantic rules " +
+      "(change id, verbatim source prompt, expected revision, status complete, unique local ids, reference integrity), " +
+      "then deterministically renders and validates understanding.md before persisting anything. " +
+      "Malformed JSON is rejected; schema-invalid JSON is rejected; semantic failures are rejected with the full " +
+      "error list — fix the document and resubmit. Never write understanding.json / understanding.md yourself. " +
+      "Only available while the understanding phase is RUNNING.",
+    parameters: Type.Object({
+      document: Type.Object({}, { description: "The complete understanding document conforming to understanding.schema.json" }),
+    }),
+    async execute(_id, params, _signal, _onUpdate, ctx) {
+      try {
+        const engine = engineFor(ctx.cwd);
+        const r = engine.submitUnderstanding(params.document);
+        refreshWidget(engine, ctx.ui);
+        return ok(
+          `Understanding document accepted: ${r.jsonPath} (revision ${r.revision}, sha256:${r.hash.slice(0, 16)}\u2026) + generated ${r.mdPath}${r.warnings ? ` (${r.warnings} warning(s))` : ""}.\n` +
+            "Now call factory_phase_complete to validate and request human approval.",
         );
       } catch (e) {
         return fail(describeError(e));

@@ -12,12 +12,14 @@ import {
   reviseRequirement,
   writeChangeFile,
   changeFile,
+  advanceTo,
 } from "./helpers.ts";
 
 test("a non-conformant artifact cannot complete a phase and is not recorded", () => {
   const root = makeRoot();
   const engine = newEngine(root);
   const w = engine.initChange("blocked by contract");
+  advanceTo(root, engine, "requirement");
   engine.beginCurrentPhase();
   engine.appendRequirement("a real statement");
   writeChangeFile(root, w.change_id, "requirement.md", "not a factory artifact at all");
@@ -29,12 +31,14 @@ test("a non-conformant artifact cannot complete a phase and is not recorded", ()
   assert.equal(now.status, "RUNNING");
   assert.equal(now.pending_approval_id, null);
   assert.equal(engine.db.latestArtifact(w.change_id, "requirement"), null);
-  // the failed validation is persisted for audit
+  // the failed validation is persisted for audit (plus the passing understanding
+  // validation recorded while advancing to the requirement phase)
   const results = engine.db.listValidationResults(w.change_id);
-  assert.equal(results.length, 1);
-  assert.equal(results[0]!.phase, "requirement");
-  assert.equal(results[0]!.valid, false);
-  assert.ok(results[0]!.errorCount > 0);
+  assert.equal(results.length, 2);
+  const failed = results.filter((r) => r.phase === "requirement");
+  assert.equal(failed.length, 1);
+  assert.equal(failed[0]!.valid, false);
+  assert.ok(failed[0]!.errorCount > 0);
   engine.close();
   cleanup(root);
 });
@@ -43,6 +47,7 @@ test("a stale revision (unchanged file after rejection) is refused; the revised 
   const root = makeRoot();
   const engine = newEngine(root);
   const w = engine.initChange("stale revision");
+  advanceTo(root, engine, "requirement");
   engine.beginCurrentPhase();
   engine.appendRequirement("statement one");
   writeChangeFile(root, w.change_id, "requirement.md", makeArtifact("requirement", engine));
@@ -72,6 +77,7 @@ test("a tampered upstream artifact blocks the downstream phase (integrity is re-
   const root = makeRoot();
   const engine = newEngine(root);
   engine.initChange("tamper");
+  completePhase(root, engine, "understanding");
   completePhase(root, engine, "requirement");
   completePhase(root, engine, "spec");
   const changeId = engine.requireActive().change_id;
@@ -95,6 +101,7 @@ test("a conformant artifact completes with a persisted passing validation", () =
   const root = makeRoot();
   const engine = newEngine(root);
   const w = engine.initChange("green path");
+  completePhase(root, engine, "understanding");
   completePhase(root, engine, "requirement");
   const results = engine.db.listValidationResults(w.change_id);
   const req = results.filter((r) => r.phase === "requirement");
@@ -110,6 +117,7 @@ test("/factory validate re-runs validation without side effects", async () => {
   const root = makeRoot();
   const engine = newEngine(root);
   const w = engine.initChange("validate command");
+  advanceTo(root, engine, "requirement");
   const notifications: { msg: string }[] = [];
   const deps = {
     engineFor: () => engine,
@@ -154,6 +162,7 @@ test("no engine path records an artifact that skipped validation", () => {
   const root = makeRoot();
   const engine = newEngine(root);
   const w = engine.initChange("no bypass");
+  advanceTo(root, engine, "requirement");
   engine.beginCurrentPhase();
   engine.appendRequirement("s");
   // attempt the old MVP shortcut: file on disk but never through the contract gate

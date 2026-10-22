@@ -12,9 +12,12 @@ import {
   readFileOrNull,
   sha256,
   sha256File,
+  writeArtifactAtomic,
 } from "./artifacts/artifact-store.ts";
 import { getContract } from "./artifacts/artifact-registry.ts";
 import { validateArtifact, formatValidationResult, errorIssues, warningIssues } from "./artifacts/artifact-validator.ts";
+import { validateUnderstandingArtifact } from "./artifacts/understanding-validator.ts";
+import { renderUnderstandingMarkdown, validateUnderstandingMarkdown } from "./artifacts/understanding-renderer.ts";
 import type { ArtifactValidationResult } from "./artifacts/artifact-types.ts";
 import type { PhaseContext, UpstreamArtifactRef } from "./artifacts/validation-context.ts";
 import {
@@ -151,8 +154,11 @@ export class FactoryEngine {
   // ------------------------------------------------------------- init
 
   /**
-   * Create a new change at phase `requirement`, status IDLE.
-   * Never touches an existing non-completed workflow (no silent replacement).
+   * Create a new change at phase `understanding`, status IDLE.
+   * A new Change must always enter the understanding phase first; the
+   * extension enforces the ordering understanding → requirement → … →
+   * verification. Never touches an existing non-completed workflow
+   * (no silent replacement).
    */
   initChange(description: string): WorkflowRecord {
     const desc = description.trim();
@@ -172,7 +178,7 @@ export class FactoryEngine {
       id: this.db.newId("wf"),
       change_id: changeId,
       description: desc,
-      current_phase: "requirement",
+      current_phase: "understanding",
       status: "IDLE",
       revision: 1,
       pending_approval_id: null,
@@ -245,6 +251,14 @@ export class FactoryEngine {
       detail = w.status === "REJECTED"
         ? `Revising phase "${nw.current_phase}" after rejection`
         : `Starting phase "${nw.current_phase}"`;
+    }
+    // Requirement may not start until the Understanding artifact still
+    // validates end-to-end (JSON schema + semantics + Markdown projection).
+    // The approval gate is already guaranteed by the state machine (requirement
+    // is only reachable after the understanding approval); this re-verifies
+    // the on-disk artifacts before doing requirement work.
+    if (nw.current_phase === "requirement" && nw.status === "RUNNING" && w.status !== "AWAITING_APPROVAL") {
+      this.verifyUnderstandingUpstream();
     }
     this.db.tx(() => {
       this.db.updateWorkflow(nw, w.revision);
@@ -363,6 +377,7 @@ export class FactoryEngine {
     return {
       changeId,
       expectedRevision,
+      changeDescription: this.db.getWorkflowByChange(changeId)?.description,
       requirementHistory,
       historyIds,
       tasks: this.db.listTasks(changeId),
@@ -390,7 +405,14 @@ export class FactoryEngine {
     for (const u of ctx.upstream) upstreamRaw.set(u.phase, u.text);
     let result: ArtifactValidationResult;
     try {
-      result = validateArtifact({ contract, rawText: text, ctx, artifactHash: hash, upstreamRaw });
+      if (phase === "understanding") {
+        // JSON-first phase: the candidate IS the canonical JSON document;
+        // the Markdown projection must match the deterministic re-render.
+        const mdText = readFileOrNull(changeFile(this.root, changeId, "understanding", "understanding.md"));
+        result = validateUnderstandingArtifact({ rawText: text, mdText, requireMarkdown: true, artifactHash: hash, ctx });
+      } else {
+        result = validateArtifact({ contract, rawText: text, ctx, artifactHash: hash, upstreamRaw });
+      }
     } catch (e) {
       if (isWorkflowError(e)) throw e;
       throw new WorkflowError(
@@ -432,6 +454,216 @@ export class FactoryEngine {
     const result = this.runArtifactValidation(w.change_id, phase, text, hash, expectedRevision);
     this.lastValidation = { phase, result };
     return { phase, result, latest };
+  }
+
+  /**
+   * Understanding phase only: submit the understanding document (JSON-first
+   * artifact generation). The LLM proposes the document; ALL of the following
+   * is extension code:
+   *   1. JSON parse (a string is parsed; malformed JSON is rejected)
+   *   2. JSON Schema validation (pinned Draft 2020-12, fail closed)
+   *   3. semantic validation (change id, verbatim source prompt, revision,
+   *      status=complete, duplicate local ids, reference integrity)
+   *   4. deterministic Markdown render + structure validation
+   *   5. atomic persistence of understanding.json THEN understanding.md,
+   *      with post-write read-back verification
+   * Nothing is written unless layers 1–4 all pass; a failed submission
+   * leaves the previous state untouched.
+   */
+  submitUnderstanding(input: unknown): { revision: number; hash: string; jsonPath: string; mdPath: string; warnings: number } {
+    const w = this.requireActive();
+    if (w.current_phase !== "understanding" || w.status !== "RUNNING") {
+      throw new WorkflowError(
+        "ILLEGAL_TRANSITION",
+        "The understanding document can only be submitted while the understanding phase is RUNNING (start it with /factory run).",
+      );
+    }
+
+    // 1) Parse. The tool normally passes an object; a string is treated as
+    //    raw JSON text so malformed JSON is rejected here, not later.
+    let doc: unknown = input;
+    if (typeof input === "string") {
+      try {
+        doc = JSON.parse(input);
+      } catch (e) {
+        throw new WorkflowError(
+          "CONTRACT_ERROR",
+          `Submitted understanding is not valid JSON: ${e instanceof Error ? e.message : String(e)}. Fix the JSON and resubmit via factory_understanding_submit.`,
+        );
+      }
+    }
+    const jsonText = JSON.stringify(doc, null, 2) + "\n";
+
+    const latest = this.db.latestArtifact(w.change_id, "understanding");
+    // Same rule as every other phase: resubmitting the currently-recorded
+    // content keeps its revision; anything else is the next revision.
+    // (The candidate is the submitted text, not whatever is on disk.)
+    const expectedRevision =
+      latest && sha256(jsonText) === latest.hash ? latest.revision : (latest ? latest.revision + 1 : 1);
+    const ctx = this.buildPhaseContext(w.change_id, "understanding", expectedRevision);
+    const result = validateUnderstandingArtifact({
+      rawText: jsonText,
+      mdText: null,
+      requireMarkdown: false,
+      artifactHash: sha256(jsonText),
+      ctx,
+    });
+    this.lastValidation = { phase: "understanding", result };
+    if (!result.valid) {
+      throw new WorkflowError(
+        "INVALID_ARTIFACT",
+        `Understanding candidate FAILED validation (${errorIssues(result).length} error(s), ${warningIssues(result).length} warning(s)). Nothing was written. Fix the document and resubmit.\n\n` +
+          formatValidationResult(result),
+      );
+    }
+
+    // 4) Deterministic render + structure validation (renderer is trusted
+    //    extension code; a structural failure here is an installation bug).
+    const typedDoc = doc as Parameters<typeof renderUnderstandingMarkdown>[0];
+    const rendered = renderUnderstandingMarkdown(typedDoc);
+    const mdProblems = validateUnderstandingMarkdown(rendered, "understanding").filter((i) => i.severity === "ERROR");
+    if (mdProblems.length > 0) {
+      throw new WorkflowError(
+        "CONTRACT_ERROR",
+        `Deterministic understanding.md render failed structural validation (renderer bug): ${mdProblems.map((i) => i.code).join(", ")}. Nothing was written.`,
+      );
+    }
+
+    // 5) Persist: canonical JSON first, then the Markdown projection.
+    const jsonFile = changeFile(this.root, w.change_id, "understanding");
+    const mdFile = changeFile(this.root, w.change_id, "understanding", "understanding.md");
+    try {
+      writeArtifactAtomic(jsonFile, jsonText);
+      writeArtifactAtomic(mdFile, rendered);
+    } catch (e) {
+      throw new WorkflowError(
+        "PERSISTENCE_ERROR",
+        `Understanding validation passed but persistence failed: ${describeError(e)} The phase is NOT complete; fix the file system and resubmit.`,
+      );
+    }
+    const reJson = readFileOrNull(jsonFile);
+    const reMd = readFileOrNull(mdFile);
+    if (reJson !== jsonText || reMd !== rendered) {
+      throw new WorkflowError(
+        "PERSISTENCE_ERROR",
+        "Post-write verification of understanding.json/understanding.md failed (read-back mismatch). The phase is NOT complete; resubmit.",
+      );
+    }
+
+    const hash = sha256(jsonText);
+    const warnings = warningIssues(result).length;
+    this.db.saveValidationResult(w.change_id, "understanding", hash, {
+      valid: true,
+      errorCount: 0,
+      warningCount: warnings,
+      templateVersion: result.templateVersion,
+      schemaId: result.schemaId,
+      parserVersion: result.parserVersion,
+      resultJson: JSON.stringify(result),
+    });
+    this.db.insertEvent(
+      w.id, w.change_id, "understanding", "UNDERSTANDING_SUBMITTED",
+      `understanding.json accepted (candidate revision ${expectedRevision}, sha256:${hash.slice(0, 16)}); understanding.md rendered deterministically (${warnings} warning(s))`,
+      this.now(),
+    );
+    return { revision: expectedRevision, hash, jsonPath: path.relative(this.root, jsonFile), mdPath: path.relative(this.root, mdFile), warnings };
+  }
+
+  /**
+   * Re-render understanding.md from the persisted understanding.json WITHOUT
+   * any LLM call. The JSON is re-validated first (fail closed); the phase is
+   * never marked complete by this operation — it only restores the
+   * deterministic projection (recovery path).
+   */
+  regenerateUnderstanding(): { hash: string; mdPath: string } {
+    const w = this.requireActive();
+    const jsonFile = changeFile(this.root, w.change_id, "understanding");
+    const mdFile = changeFile(this.root, w.change_id, "understanding", "understanding.md");
+    const jsonText = readFileOrNull(jsonFile);
+    if (jsonText === null) {
+      throw new WorkflowError(
+        "MISSING_ARTIFACT",
+        `No understanding.json for ${w.change_id} — nothing to re-render. Submit the document with factory_understanding_submit first.`,
+      );
+    }
+    const latest = this.db.latestArtifact(w.change_id, "understanding");
+    const expectedRevision = latest ? latest.revision : 1;
+    const ctx = this.buildPhaseContext(w.change_id, "understanding", expectedRevision);
+    const result = validateUnderstandingArtifact({
+      rawText: jsonText,
+      mdText: null,
+      requireMarkdown: false,
+      artifactHash: sha256(jsonText),
+      ctx,
+    });
+    if (!result.valid) {
+      throw new WorkflowError(
+        "INVALID_ARTIFACT",
+        `Persisted understanding.json FAILED re-validation (${errorIssues(result).length} error(s)); refusing to re-render.\n\n` + formatValidationResult(result),
+      );
+    }
+    const rendered = renderUnderstandingMarkdown(JSON.parse(jsonText) as Parameters<typeof renderUnderstandingMarkdown>[0]);
+    const mdProblems = validateUnderstandingMarkdown(rendered, "understanding").filter((i) => i.severity === "ERROR");
+    if (mdProblems.length > 0) {
+      throw new WorkflowError("CONTRACT_ERROR", `Deterministic understanding.md render failed structural validation: ${mdProblems.map((i) => i.code).join(", ")}.`);
+    }
+    try {
+      writeArtifactAtomic(mdFile, rendered);
+    } catch (e) {
+      throw new WorkflowError("PERSISTENCE_ERROR", `Could not re-render understanding.md: ${describeError(e)}`);
+    }
+    if (readFileOrNull(mdFile) !== rendered) {
+      throw new WorkflowError("PERSISTENCE_ERROR", "Post-write verification of understanding.md failed; try again.");
+    }
+    const hash = sha256(jsonText);
+    this.db.insertEvent(
+      w.id, w.change_id, "understanding", "UNDERSTANDING_MD_REGENERATED",
+      `understanding.md re-rendered deterministically from understanding.json (sha256:${hash.slice(0, 16)}); no LLM call involved`,
+      this.now(),
+    );
+    return { hash, mdPath: path.relative(this.root, mdFile) };
+  }
+
+  /**
+   * Gate before the requirement phase starts: the recorded Understanding
+   * artifact must exist, still match its recorded hash, and pass full
+   * validation (schema + semantics + Markdown projection). Called from
+   * beginCurrentPhase when the requirement phase is about to start.
+   */
+  verifyUnderstandingUpstream(): void {
+    const w = this.requireActive();
+    const latest = this.db.latestArtifact(w.change_id, "understanding");
+    if (!latest) {
+      throw new WorkflowError(
+        "INVALID_ARTIFACT",
+        `Cannot start the requirement phase: no Understanding artifact is recorded for ${w.change_id}. Complete and get the understanding phase approved first.`,
+      );
+    }
+    const jsonFile = changeFile(this.root, w.change_id, "understanding");
+    const jsonText = readFileOrNull(jsonFile);
+    if (jsonText === null) {
+      throw new WorkflowError(
+        "PERSISTENCE_ERROR",
+        `Cannot start the requirement phase: recorded understanding.json (${latest.path}) is missing from disk. Restore it or re-run the understanding phase.`,
+      );
+    }
+    if (sha256(jsonText) !== latest.hash) {
+      throw new WorkflowError(
+        "PERSISTENCE_ERROR",
+        `Cannot start the requirement phase: understanding.json on disk no longer matches the approved revision ${latest.revision} (hash mismatch). Restore the approved file or re-run the understanding phase for a new approval.`,
+      );
+    }
+    const mdFile = changeFile(this.root, w.change_id, "understanding", "understanding.md");
+    const mdText = readFileOrNull(mdFile);
+    const ctx = this.buildPhaseContext(w.change_id, "understanding", latest.revision);
+    const result = validateUnderstandingArtifact({ rawText: jsonText, mdText, requireMarkdown: true, artifactHash: latest.hash, ctx });
+    if (!result.valid) {
+      throw new WorkflowError(
+        "INVALID_ARTIFACT",
+        `Cannot start the requirement phase: the approved Understanding artifact no longer validates (${errorIssues(result).length} error(s)).\n\n` +
+          formatValidationResult(result),
+      );
+    }
   }
 
   /**
@@ -642,7 +874,7 @@ export class FactoryEngine {
       if (next) {
         this.db.insertEvent(nw.id, w.change_id, next, "PHASE_ADVANCED", `Advanced from "${w.current_phase}" to "${next}"`, at);
       } else {
-        this.db.insertEvent(nw.id, w.change_id, w.current_phase, "WORKFLOW_COMPLETED", "All six phases approved", at);
+        this.db.insertEvent(nw.id, w.change_id, w.current_phase, "WORKFLOW_COMPLETED", "All phases approved", at);
       }
     });
     return { workflow: nw, approval: resolved };

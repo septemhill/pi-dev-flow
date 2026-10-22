@@ -22,6 +22,7 @@ test("a legacy upstream blocks downstream phases with one actionable error (no T
   const root = makeRoot();
   const engine = newEngine(root);
   const w = engine.initChange("legacy upstream");
+  completePhase(root, engine, "understanding");
   completePhase(root, engine, "requirement");
   markLegacy(engine, "requirement");
 
@@ -44,6 +45,7 @@ test("newly recorded artifacts carry the pinned contract marker", () => {
   const root = makeRoot();
   const engine = newEngine(root);
   const w = engine.initChange("contract marker");
+  completePhase(root, engine, "understanding");
   completePhase(root, engine, "requirement");
   const row = engine.db.latestArtifact(w.change_id, "requirement");
   assert.ok(row);
@@ -56,6 +58,7 @@ test("/factory status marks legacy artifacts and a green workflow shows none", a
   const root = makeRoot();
   const engine = newEngine(root);
   const w = engine.initChange("status legacy");
+  completePhase(root, engine, "understanding");
   completePhase(root, engine, "requirement");
   markLegacy(engine, "requirement");
 
@@ -80,6 +83,7 @@ test("/factory status marks legacy artifacts and a green workflow shows none", a
   const root2 = makeRoot();
   const engine2 = newEngine(root2);
   engine2.initChange("green");
+  completePhase(root2, engine2, "understanding");
   completePhase(root2, engine2, "requirement");
   const n2: string[] = [];
   const ctx2 = { ...ctx, cwd: engine2.root, ui: { notify: (m: string) => n2.push(m), setWidget: () => {} } };

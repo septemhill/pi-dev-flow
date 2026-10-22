@@ -1,5 +1,6 @@
 /** The fixed, ordered workflow. The extension enforces this order; prompts do not. */
 export type Phase =
+  | "understanding"
   | "requirement"
   | "spec"
   | "design"
@@ -8,6 +9,7 @@ export type Phase =
   | "verification";
 
 export const PHASES: readonly Phase[] = [
+  "understanding",
   "requirement",
   "spec",
   "design",
@@ -18,6 +20,9 @@ export const PHASES: readonly Phase[] = [
 
 /** Artifact file (inside .factory/changes/<change_id>/) required by each phase. */
 export const PHASE_ARTIFACT_FILE: Record<Phase, string> = {
+  // The understanding phase is JSON-first: the canonical artifact is the
+  // validated JSON document; understanding.md is a deterministic render.
+  understanding: "understanding.json",
   requirement: "requirement.md",
   spec: "spec.md",
   design: "design.md",
@@ -45,6 +50,18 @@ export function nextPhase(p: Phase): Phase | null {
  * These headings are checked by extension code, not by the LLM.
  */
 export const REQUIRED_SECTIONS: Record<Phase, string[]> = {
+  understanding: [
+    "## 1. Metadata",
+    "## 2. Original Prompt",
+    "## 3. Interpreted Intent",
+    "## 4. Explicit Information",
+    "## 5. Inferences and Assumptions",
+    "## 6. Scope and Boundaries",
+    "## 7. Ambiguities and Open Questions",
+    "## 8. Candidate Requirements",
+    "## 9. Understanding Summary",
+    "## 10. Traceability",
+  ],
   requirement: ["## Consolidated Requirements", "## Open Questions & Assumptions"],
   spec: ["## Expected Behavior", "## Inputs", "## Outputs", "## Acceptance Criteria"],
   design: ["## Architecture", "## Constraints", "## Decisions & Trade-offs", "## Affected Areas"],

@@ -1,0 +1,74 @@
+{
+  "$comment": "Skeleton of the understanding artifact. Replace every <placeholder> with real content, keep all fields and their types. Submit the finished document with the factory_understanding_submit tool — never write understanding.json or understanding.md yourself.",
+  "metadata": {
+    "artifactType": "understanding",
+    "contractVersion": "1.0.0",
+    "changeId": "<active change id, exactly as given>",
+    "revision": "<expected revision from the phase prompt>",
+    "status": "complete",
+    "sourcePromptRef": "change description of <change id>"
+  },
+  "sourcePrompt": "<the original prompt (change description) VERBATIM — copy it exactly from the phase prompt>",
+  "intent": {
+    "objective": "<primary objective as interpreted from the prompt>",
+    "expectedOutcome": "<expected end state if the objective is achieved>",
+    "successIndicators": ["<observable indicator that the outcome was achieved>"]
+  },
+  "explicitInformation": [
+    {
+      "id": "EXP-001",
+      "type": "goal",
+      "statement": "<information explicitly stated in the prompt>",
+      "sourceRef": "<quote or location in the prompt>"
+    }
+  ],
+  "inferences": [
+    {
+      "id": "INF-001",
+      "statement": "<inferred conclusion or assumption>",
+      "evidence": "<prompt text / repository fact / artifact entry supporting it>",
+      "rationale": "<concise, auditable rationale — not hidden chain-of-thought>",
+      "confidence": "medium",
+      "impactIfWrong": "<consequence if the inference is incorrect>",
+      "status": "open"
+    }
+  ],
+  "scope": {
+    "inScope": ["<item the prompt puts in scope>"],
+    "outOfScope": [
+      {
+        "item": "<item with evidence that it is out of scope>",
+        "evidence": "<prompt statement justifying the classification>"
+      }
+    ],
+    "undetermined": ["<item whose scope is not decided — do NOT classify it out of scope>"]
+  },
+  "ambiguities": [
+    {
+      "id": "Q-001",
+      "question": "<unresolved question or ambiguous statement>",
+      "interpretations": ["<plausible interpretation>"],
+      "impact": "<impact if the wrong interpretation is chosen>",
+      "status": "open"
+    }
+  ],
+  "candidateRequirements": [
+    {
+      "id": "CR-001",
+      "statement": "<candidate requirement derived from the prompt>",
+      "origin": "explicit",
+      "sourceRefs": ["EXP-001", "prompt"],
+      "relatedIds": ["INF-001"]
+    }
+  ],
+  "summary": {
+    "narrative": "<concise summary of the interpreted intent and important conclusions>",
+    "unresolvedIssues": ["<important unresolved issue>"],
+    "clarificationsNeeded": ["<decision or clarification required from the user>"]
+  },
+  "traceability": {
+    "sourcePromptRef": "change description of <change id>",
+    "relatedArtifactRefs": [],
+    "requirementRefs": []
+  }
+}

@@ -541,6 +541,7 @@ test("gate: a spec that leaves a MUST requirement uncovered cannot complete", ()
   const engine = newEngine(root);
   const w = engine.initChange("coverage gate spec");
   // requirement phase: two requirements
+  completePhase(root, engine, "understanding");
   engine.beginCurrentPhase();
   engine.appendRequirement("do the thing");
   writeChangeFile(root, w.change_id, "requirement.md", adapt(REQ2_DOC, w.change_id));
@@ -566,6 +567,7 @@ test("gate: a design that does not realize an AC cannot complete", () => {
   const root = makeRoot();
   const engine = newEngine(root);
   engine.initChange("coverage gate design");
+  completePhase(root, engine, "understanding");
   completePhase(root, engine, "requirement");
   completePhase(root, engine, "spec");
   engine.beginCurrentPhase();
@@ -587,6 +589,7 @@ test("gate: a task plan that leaves an FR unimplemented cannot complete", () => 
   const root = makeRoot();
   const engine = newEngine(root);
   engine.initChange("coverage gate tasks");
+  completePhase(root, engine, "understanding");
   completePhase(root, engine, "requirement");
   completePhase(root, engine, "spec");
   completePhase(root, engine, "design");
@@ -606,6 +609,7 @@ test("waiver: waiveItem validates item, status and rationale; is idempotent; rev
   const root = makeRoot();
   const engine = newEngine(root);
   const w = engine.initChange("waiver engine");
+  completePhase(root, engine, "understanding");
   engine.beginCurrentPhase();
   engine.appendRequirement("do the thing");
   writeChangeFile(root, w.change_id, "requirement.md", adapt(REQ2_DOC, w.change_id));
@@ -644,6 +648,7 @@ test("waiver: advancing upstream STALEs the waiver and re-blocks the gate", () =
   const root = makeRoot();
   const engine = newEngine(root);
   const w = engine.initChange("waiver stale");
+  completePhase(root, engine, "understanding");
   engine.beginCurrentPhase();
   engine.appendRequirement("do the thing");
   writeChangeFile(root, w.change_id, "requirement.md", adapt(REQ2_DOC, w.change_id));
@@ -671,6 +676,7 @@ test("report: /factory traceability shows stages, statuses, waivers and legacy m
   const root = makeRoot();
   const engine = newEngine(root);
   const w = engine.initChange("trace report");
+  completePhase(root, engine, "understanding");
   for (const p of ["requirement", "spec", "design", "task_planning", "implementation"] as Phase[]) {
     completePhase(root, engine, p);
   }
@@ -697,6 +703,7 @@ test("commands: /factory waive and /factory revoke-waiver record auditable excep
   const root = makeRoot();
   const engine = newEngine(root);
   const w = engine.initChange("waiver commands");
+  completePhase(root, engine, "understanding");
   engine.beginCurrentPhase();
   engine.appendRequirement("do the thing");
   writeChangeFile(root, w.change_id, "requirement.md", adapt(REQ2_DOC, w.change_id));

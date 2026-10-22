@@ -28,6 +28,7 @@ describe("requirement phase: knowledge discovery is wired into the work order", 
   it("the requirement work order carries the knowledge discovery section with existing records", () => {
     const { root, engine } = setup();
     const w = engine.initChange("Test change");
+    advanceTo(root, engine, "requirement");
     engine.beginCurrentPhase(); // requirement RUNNING
     const km = engine.knowledge;
     km.createDraft("constraint", baseConstraint());
@@ -71,15 +72,16 @@ describe("requirement phase: knowledge discovery is wired into the work order", 
     expect(prompt).not.toContain("## Project Knowledge discovery");
   });
 
-  it("the six-phase order is unchanged", () => {
-    expect(PHASES).toEqual(["requirement", "spec", "design", "task_planning", "implementation", "verification"]);
+  it("the seven-phase order starts with understanding", () => {
+    expect(PHASES).toEqual(["understanding", "requirement", "spec", "design", "task_planning", "implementation", "verification"]);
   });
 });
 
 describe("requirement phase: knowledge stays out of the workflow", () => {
   it("creating knowledge during requirement does not move the workflow", () => {
-    const { engine } = setup();
+    const { root, engine } = setup();
     const w = engine.initChange("Test change");
+    advanceTo(root, engine, "requirement");
     engine.beginCurrentPhase();
     expect(engine.requireActive().status).toBe("RUNNING");
 
@@ -97,7 +99,7 @@ describe("requirement phase: knowledge stays out of the workflow", () => {
   it("ordinary requirements do not create knowledge records", () => {
     const { root, engine } = setup();
     engine.initChange("Test change");
-    completePhase(root, engine, "requirement"); // plain requirement artifact, no knowledge
+    advanceTo(root, engine, "spec"); // plain requirement artifact, no knowledge
     expect(engine.knowledge.listKnowledge().items).toEqual([]);
     // ...and the workflow moved on exactly as before.
     expect(engine.requireActive().current_phase).toBe("spec");

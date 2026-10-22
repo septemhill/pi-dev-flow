@@ -43,6 +43,7 @@ export function normalizeId(id: string): string {
 }
 
 const SCAN_PREFIXES: Record<Phase, string[]> = {
+  understanding: [],
   requirement: [],
   spec: ["REQ"],
   design: ["REQ", "FR", "AC"],

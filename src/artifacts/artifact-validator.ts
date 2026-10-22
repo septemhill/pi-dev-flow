@@ -55,6 +55,14 @@ export function validateArtifact(input: ValidateInput): ArtifactValidationResult
   // 3) Traceability (parse upstreams, integrity + id resolution)
   const upstreamByPhase = new Map<Phase, ReturnType<typeof parseArtifact> | null>();
   for (const ref of ctx.upstream) {
+    // The understanding artifact is JSON-first: it has no Markdown sections
+    // and no coverage obligations, so it is deliberately NOT parsed here.
+    // Its integrity is still enforced (hash check in traceabilityIssues) and
+    // its full validation happens in understanding-validator.ts.
+    if (ref.phase === "understanding") {
+      upstreamByPhase.set(ref.phase, null);
+      continue;
+    }
     const text = upstreamRaw.get(ref.phase);
     if (text === null || text === undefined) {
       upstreamByPhase.set(ref.phase, null);

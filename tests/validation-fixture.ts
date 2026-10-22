@@ -339,6 +339,8 @@ None identified
 `;
 
 export const DOCS: Record<Phase, string> = {
+  // understanding is JSON-first: there is no Markdown fixture doc for it.
+  understanding: "",
   requirement: REQ_DOC,
   spec: SPEC_DOC,
   design: DESIGN_DOC,

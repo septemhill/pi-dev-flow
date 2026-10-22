@@ -9,6 +9,7 @@ import type { Phase } from "./workflow/phases.ts";
  * extension enforces in code.
  */
 const TEMPLATE_FILE: Record<Phase, string> = {
+  understanding: "understanding.md",
   requirement: "requirement.md",
   spec: "spec.md",
   design: "design.md",

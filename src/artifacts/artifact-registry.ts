@@ -136,8 +136,33 @@ function contract(
   };
 }
 
-/** The six pinned artifact contracts, one per phase. */
+/** The pinned artifact contracts, one per phase. */
 export const ARTIFACT_CONTRACTS: Record<Phase, ArtifactContract> = {
+  // Understanding is JSON-first: the canonical artifact is the validated
+  // understanding.json submitted via the factory_understanding_submit tool.
+  // understanding.md is a deterministic render (understanding-renderer.ts),
+  // never parsed; its sectionOrder maps the fixed headings to the document's
+  // top-level properties for diagnostic labels only.
+  understanding: contract(
+    "understanding",
+    "understanding",
+    "Understanding",
+    "understanding.template.json",
+    "understanding.schema.json",
+    [
+      section("1. Metadata", "metadata", "text"),
+      section("2. Original Prompt", "sourcePrompt", "text"),
+      section("3. Interpreted Intent", "intent", "text"),
+      section("4. Explicit Information", "explicitInformation", "text"),
+      section("5. Inferences and Assumptions", "inferences", "text"),
+      section("6. Scope and Boundaries", "scope", "text"),
+      section("7. Ambiguities and Open Questions", "ambiguities", "text"),
+      section("8. Candidate Requirements", "candidateRequirements", "text"),
+      section("9. Understanding Summary", "summary", "text"),
+      section("10. Traceability", "traceability", "text"),
+    ],
+  ),
+
   requirement: contract(
     "requirement",
     "requirement",

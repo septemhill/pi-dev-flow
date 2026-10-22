@@ -8,6 +8,7 @@ import {
   changeFile,
   makeArtifact,
   makeRoot,
+  makeUnderstandingDoc,
   newEngine,
   reviseRequirement,
   writeChangeFile,
@@ -15,7 +16,16 @@ import {
 } from "./helpers.ts";
 
 function pendingRequirementApproval(engine: Engine): void {
-  engine.beginCurrentPhase();
+  // understanding is the first phase: complete + approve it first
+  let w = engine.requireActive();
+  if (w.current_phase === "understanding") {
+    engine.beginCurrentPhase();
+    engine.submitUnderstanding(makeUnderstandingDoc(w.change_id, w.description));
+    engine.completeCurrentPhase();
+    engine.approve("auto (test)");
+    w = engine.requireActive();
+  }
+  if (w.status !== "RUNNING") engine.beginCurrentPhase();
   engine.appendRequirement("approval test requirement");
   writeChangeFile(
     engine.root,

@@ -27,6 +27,12 @@ export interface UpstreamArtifactRef {
 
 export interface PhaseContext {
   changeId: string;
+  /**
+   * The change description recorded at /factory init — the immutable source
+   * prompt for the understanding phase. Undefined when no workflow row exists
+   * for this change (then the source-prompt agreement check is skipped).
+   */
+  changeDescription?: string;
   /** Revision the engine would record if this candidate passes (latest+1, or 1). */
   expectedRevision: number;
   /** Raw entry lines of requirements-history.md ("- [ts] (R1) statement"). */

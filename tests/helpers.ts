@@ -416,12 +416,84 @@ function verificationDoc(engine: Engine): string {
   ].join("\n");
 }
 
+/** A valid understanding document for a change (JSON-first canonical artifact). */
+export function makeUnderstandingDoc(changeId: string, description: string, extra: Record<string, unknown> = {}) {
+  return {
+    metadata: {
+      artifactType: "understanding",
+      contractVersion: "1.0.0",
+      changeId,
+      revision: 1,
+      status: "complete",
+      sourcePromptRef: "original prompt (verbatim in sourcePrompt)",
+    },
+    sourcePrompt: description,
+    intent: {
+      objective: `Understand what to change: ${description.slice(0, 40)}`,
+      expectedOutcome: "An approved, unambiguous interpretation of the change description.",
+      successIndicators: ["Requirements derive from documented candidates", "Ambiguities surfaced, not silently resolved"],
+    },
+    explicitInformation: [
+      { id: "EXP-001", type: "goal", statement: `The change concerns: ${description}`, sourceRef: "original prompt (full text, verbatim in sourcePrompt)" },
+    ],
+    inferences: [
+      {
+        id: "INF-001",
+        statement: "Existing phases and behavior remain unchanged except where the change requires it.",
+        evidence: "The prompt does not ask for unrelated changes.",
+        rationale: "Minimal-diff interpretation: restrict the change to what the prompt asks.",
+        confidence: "medium",
+        impactIfWrong: "Over- or under-scoped requirement set.",
+        status: "open",
+      },
+    ],
+    scope: {
+      inScope: ["The functionality described in the original prompt"],
+      outOfScope: [],
+      undetermined: ["Whether documentation updates are expected (not stated in the prompt)"],
+    },
+    ambiguities: [
+      {
+        id: "Q-001",
+        question: "Does the change include documentation updates?",
+        interpretations: ["Yes — docs stay in sync", "No — code-only"],
+        impact: "Affects the requirement set and verification checks.",
+        status: "open",
+      },
+    ],
+    candidateRequirements: [
+      {
+        id: "CR-001",
+        statement: `Implement the change described in the original prompt: ${description}`,
+        origin: "explicit",
+        sourceRefs: ["EXP-001", "prompt"],
+        relatedIds: ["INF-001"],
+      },
+    ],
+    summary: {
+      narrative: "The change is scoped to the described functionality; open questions are listed.",
+      unresolvedIssues: ["Q-001"],
+      clarificationsNeeded: ["Confirm whether documentation updates are in scope (Q-001)."],
+    },
+    traceability: {
+      sourcePromptRef: "original prompt (verbatim in sourcePrompt)",
+      relatedArtifactRefs: [],
+      requirementRefs: [],
+    },
+    ...extra,
+  };
+}
+
 /**
  * Build a template-conformant artifact candidate for the engine's active
  * change and `phase`, derived entirely from persisted engine state.
+ * (understanding is JSON-first: it is submitted via engine.submitUnderstanding,
+ * not written as a file — see completePhase.)
  */
 export function makeArtifact(phase: Phase, engine: Engine): string {
   switch (phase) {
+    case "understanding":
+      throw new Error("understanding is JSON-first: use engine.submitUnderstanding(makeUnderstandingDoc(...))");
     case "requirement": return requirementDoc(engine);
     case "spec": return specDoc(engine);
     case "design": return designDoc(engine);
@@ -479,6 +551,9 @@ export function completePhase(root: string, engine: Engine, phase: Phase): void 
   if (w.status !== "RUNNING") engine.beginCurrentPhase();
 
   switch (phase) {
+    case "understanding":
+      engine.submitUnderstanding(makeUnderstandingDoc(w.change_id, w.description));
+      break;
     case "requirement":
       engine.appendRequirement(`requirement for ${w.change_id}`);
       break;
@@ -504,7 +579,9 @@ export function completePhase(root: string, engine: Engine, phase: Phase): void 
       break;
   }
 
-  writeChangeFile(root, w.change_id, PHASE_ARTIFACT_FILE[phase], makeArtifact(phase, engine));
+  if (phase !== "understanding") {
+    writeChangeFile(root, w.change_id, PHASE_ARTIFACT_FILE[phase], makeArtifact(phase, engine));
+  }
   engine.completeCurrentPhase();
   engine.approve("auto-approved in test");
 }

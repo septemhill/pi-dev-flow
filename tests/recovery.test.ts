@@ -56,6 +56,7 @@ test("11b. missing artifact file is an explicit error, not a silent re-run", asy
   const root = makeRoot();
   const engine = newEngine(root);
   engine.initChange("missing file");
+  completePhase(root, engine, "understanding");
   completePhase(root, engine, "requirement"); // requirement approved; on spec now
   const changeId = engine.getWorkflow(engine.listWorkflows()[0].change_id)!.change_id;
   rmSync(changeFile(root, changeId, "requirement.md"));
@@ -77,6 +78,7 @@ test("12. interrupted execution (RUNNING at kill time) does not silently skip wo
   const root = makeRoot();
   const e1 = newEngine(root);
   e1.initChange("crash mid-phase");
+  completePhase(root, e1, "understanding");
   completePhase(root, e1, "requirement");
   e1.beginCurrentPhase(); // spec is RUNNING; now simulate a hard process death
   e1.close();
@@ -123,7 +125,7 @@ test("FAILED workflow needs explicit recovery before it can run again", async ()
   const r = engine.resume();
   assert.equal(r.recovered, true);
   assert.equal(engine.requireActive().status, "IDLE");
-  assert.equal(engine.requireActive().current_phase, "requirement");
+  assert.equal(engine.requireActive().current_phase, "understanding");
   engine.close();
   cleanup(root);
 });
@@ -132,6 +134,7 @@ test("resume never bypasses an approval gate", () => {
   const root = makeRoot();
   const engine = newEngine(root);
   engine.initChange("gate at resume");
+  completePhase(root, engine, "understanding");
   engine.beginCurrentPhase();
   engine.appendRequirement("pending review");
   writeChangeFile(root, engine.requireActive().change_id, "requirement.md", makeArtifact("requirement", engine));
@@ -178,6 +181,7 @@ test("workflow state round-trips through the /factory status command", async () 
   const root = makeRoot();
   const engine = newEngine(root);
   engine.initChange("status check");
+  completePhase(root, engine, "understanding");
   completePhase(root, engine, "requirement"); // -> spec, IDLE, spec artifact pending? no: approved
   const sent: string[] = [];
   const { ctx, notifications, deps } = ctxFor(engine, sent);

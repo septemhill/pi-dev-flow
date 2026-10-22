@@ -1,19 +1,30 @@
 # AGENTS.md — working agreement for agents in this repository
 
 This repository is **pi-ai-factory**: a pi Extension that runs a human-approved,
-six-phase development workflow (`/factory`). The LLM proposes content; the
+seven-phase development workflow (`/factory`). The LLM proposes content; the
 Extension enforces the state machine, artifact contracts, and approval gates.
 Never claim a phase is approved, a transition happened, or a gate passed unless
 the extension reported it.
 
 ## Fixed workflow (never bypass)
 
-`requirement → spec → design → task planning → implementation → verification`
+`understanding → requirement → spec → design → task planning → implementation → verification`
 
 Every phase artifact must pass the extension's pinned contract (structure →
 JSON Schema → traceability → semantics) and a human approval before the
 workflow advances. Use the `factory_*` tools only within their documented
 phase gates.
+
+## Understanding phase (JSON-first artifact)
+
+The understanding phase is the only JSON-first phase: the canonical artifact
+is `understanding.json`, submitted with the `factory_understanding_submit`
+tool. The extension parses the JSON, validates it (JSON Schema + semantics:
+verbatim source prompt, change id, expected revision, status "complete",
+unique local ids, reference integrity), then deterministically renders
+`understanding.md` and validates that projection before persisting anything.
+Never write or edit `understanding.json` / `understanding.md` by hand; the
+Markdown is a generated projection of the validated JSON.
 
 ## Project Knowledge Discovery
 

@@ -5,6 +5,7 @@ import type { Phase } from "../src/workflow/phases.ts";
 
 test("schema: every fixture document passes the full pipeline for its phase", () => {
   for (const phase of Object.keys(DOCS) as Phase[]) {
+    if (phase === "understanding") continue; // JSON-first artifact, no Markdown fixture
     const result = runValidation(phase, DOCS[phase]);
     assert.equal(result.valid, true, `${phase}: ${JSON.stringify(result.issues, null, 2)}`);
   }
