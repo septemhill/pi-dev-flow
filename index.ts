@@ -20,7 +20,7 @@ import { Type } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { FactoryEngine } from "./src/engine.ts";
 import { handleFactory } from "./src/commands/factory.ts";
-import { describeError } from "./src/workflow/errors.ts";
+import { describeError, isWorkflowError } from "./src/workflow/errors.ts";
 
 const engines = new Map<string, FactoryEngine>();
 function engineFor(cwd: string): FactoryEngine {
@@ -37,6 +37,72 @@ function ok(text: string) {
 }
 function fail(text: string) {
   return { content: [{ type: "text" as const, text }], details: undefined, isError: true };
+}
+
+const UNDERSTANDING_TOP_LEVEL = [
+  "metadata",
+  "sourcePrompt",
+  "intent",
+  "explicitInformation",
+  "inferences",
+  "scope",
+  "ambiguities",
+  "candidateRequirements",
+  "summary",
+  "traceability",
+];
+
+/**
+ * Build a diagnostic report for a failed factory_understanding_submit call.
+ * Covers the failure classes that a bare error message cannot distinguish:
+ * wrong engine/cwd (no active workflow), a missing or mistyped tool
+ * parameter, a document with the wrong shape, and unexpected exceptions
+ * (with stack, since describeError would hide them).
+ */
+function understandingDebug(engine: FactoryEngine, params: unknown, e: unknown): string {
+  const lines: string[] = [describeError(e), "", "Debug:"];
+  lines.push(`- engine root (cwd used for this call): ${engine.root}`);
+  let w: ReturnType<FactoryEngine["getActiveWorkflow"]>;
+  try {
+    w = engine.getActiveWorkflow();
+  } catch (stateErr) {
+    w = null;
+    lines.push(`- workflow state could not be read: ${String(stateErr)}`);
+  }
+  lines.push(
+    w
+      ? `- active workflow: ${w.change_id} status=${w.status} phase=${w.current_phase}`
+      : "- active workflow: NONE (is /factory init + /factory run executed in THIS directory?)",
+  );
+  try {
+    const doc = (params as { document?: unknown } | undefined)?.document;
+    if (doc === undefined) {
+      lines.push("- input: params.document is UNDEFINED — the tool call did not carry the `document` parameter");
+    } else if (typeof doc === "string") {
+      lines.push(`- input: document is a STRING (${doc.length} chars), first 160: ${JSON.stringify(doc.slice(0, 160))}`);
+    } else if (doc !== null && typeof doc === "object" && !Array.isArray(doc)) {
+      const d = doc as Record<string, unknown>;
+      const keys = Object.keys(d);
+      lines.push(`- input: document is an object, top-level keys [${keys.join(", ") || "none"}]`);
+      const missing = UNDERSTANDING_TOP_LEVEL.filter((k) => !(k in d));
+      if (missing.length > 0) lines.push(`- input: missing top-level keys: ${missing.join(", ")}`);
+      const extra = keys.filter((k) => !UNDERSTANDING_TOP_LEVEL.includes(k));
+      if (extra.length > 0) lines.push(`- input: unexpected top-level keys (rejected by schema additionalProperties:false): ${extra.join(", ")}`);
+      lines.push(`- input: metadata = ${typeof d.metadata === "object" && d.metadata !== null ? JSON.stringify(d.metadata) : `<${String(d.metadata)}> (expected object)`}`);
+      const sp = d.sourcePrompt;
+      lines.push(`- input: sourcePrompt is ${typeof sp} (${typeof sp === "string" ? `${sp.length} chars; replaced by the extension anyway` : "<not a string — schema will reject it, but the extension replaces it before validation>"})`);
+    } else {
+      lines.push(`- input: document has an unexpected type (${Array.isArray(doc) ? "array" : String(doc)})`);
+    }
+  } catch (shapeErr) {
+    lines.push(`- input shape inspection failed: ${String(shapeErr)}`);
+  }
+  if (!isWorkflowError(e) && e instanceof Error) {
+    const stack = (e.stack ?? "").split("\n").slice(0, 8).join("\n");
+    lines.push(`- UNEXPECTED exception (not a WorkflowError): ${e.name}: ${e.message}`);
+    if (stack) lines.push(stack);
+  }
+  return lines.join("\n");
 }
 
 function refreshWidget(engine: FactoryEngine, ui: { setWidget(key: string, c: string[] | undefined, o?: { placement?: "aboveEditor" | "belowEditor" }): void }): void {
@@ -131,16 +197,18 @@ export default function factoryExtension(pi: ExtensionAPI) {
       document: Type.Object({}, { description: "The complete understanding document conforming to understanding.schema.json" }),
     }),
     async execute(_id, params, _signal, _onUpdate, ctx) {
+      const engine = engineFor(ctx.cwd);
       try {
-        const engine = engineFor(ctx.cwd);
         const r = engine.submitUnderstanding(params.document);
         refreshWidget(engine, ctx.ui);
+        const w = engine.getActiveWorkflow();
         return ok(
           `Understanding document accepted: ${r.jsonPath} (revision ${r.revision}, sha256:${r.hash.slice(0, 16)}\u2026) + generated ${r.mdPath}${r.warnings ? ` (${r.warnings} warning(s))` : ""}.\n` +
+            `Workflow state: change=${w?.change_id} status=${w?.status} phase=${w?.current_phase}\n` +
             "Now call factory_phase_complete to validate and request human approval.",
         );
       } catch (e) {
-        return fail(describeError(e));
+        return fail(understandingDebug(engine, params, e));
       }
     },
   });
