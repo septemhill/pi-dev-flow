@@ -220,7 +220,7 @@ Requires Node ≥ 22.5 (built-in `node:sqlite`).
 
 | Command | Effect |
 |---|---|
-| `/factory init <description>` | Create a new change + workflow. Refused while another change is active (`ACTIVE_CHANGE_EXISTS`) — existing work is never silently replaced. |
+| `/factory init <description>` | Create a new change + workflow. Refused while another change is active (`ACTIVE_CHANGE_EXISTS`) — existing work is never silently replaced. Also accepts file input: `/factory init --file <path> [--file <path> …]` (see below). |
 | `/factory status` | Current phase, status, artifact revisions, tasks, checks, recent review events. |
 | `/factory run` | Start (or re-start after rejection) the current phase, sending the phase work order to the agent. **Refused while an approval is pending** — the gate cannot be bypassed. On an interrupted RUNNING phase it safely re-prompts the same phase. |
 | `/factory approve [comment]` | Approve the pending review. Advances **exactly one phase** (or completes the workflow). |
@@ -232,6 +232,36 @@ Requires Node ≥ 22.5 (built-in `node:sqlite`).
 | `/factory traceability` | Print the deterministic coverage report: recorded revisions, per-stage coverage with per-item states, uncovered items, graph findings, waivers (active/stale), legacy markers. |
 | `/factory waive <item-id> <stage> <rationale…>` | Grant an explicit, auditable coverage waiver for one item at one stage (rationale ≥ 10 chars; item must exist in the recorded graph and not already be covered). Pins current artifact revisions — upstream changes STALE the waiver. |
 | `/factory revoke-waiver <waiver-id>` | Revoke an active waiver; the deterministic coverage assessment stands again immediately. |
+
+### `/factory init` input
+
+```text
+/factory init Implement a user authentication feature
+/factory init --file requirements/authentication.md
+/factory init --file requirements/authentication.md --file requirements/security.md
+```
+
+- **Inline vs. files.** Use inline text for a short, self-contained change
+  description. Use `--file` when the requirement content lives in one or more
+  existing documents — the files are read verbatim (no summarizing or merging
+  by the command) and fed into the same requirement-understanding entry point
+  as inline text. Inline text and `--file` inputs cannot be combined in one
+  invocation (`INVALID_INIT_INPUT`) — put extra context into a file instead.
+- **Multiple files.** `--file` is repeatable; files are combined in the order
+  the options appear, with a `# Input File N: <path>` header and a `---`
+  separator between files so their contents stay distinct. Each file's content
+  (headings, lists, code blocks) is preserved verbatim.
+- **Path resolution.** Relative paths resolve against the working directory
+  the extension runs in; absolute paths work as-is. No directory traversal,
+  wildcards, or remote input. Provenance labels use the project-relative path
+  when available, absolute otherwise.
+- **Validation before state.** All files are read and validated (exist,
+  regular file, readable, valid UTF-8, non-whitespace) *before* any workflow
+  state is created. A missing, unreadable, or empty file aborts initialization
+  with an error naming that file (`INVALID_INIT_INPUT`) and leaves no partial
+  change behind. Duplicate paths are rejected. No input at all prints usage
+  without initializing. (File paths must not contain spaces — the pi command
+  line has no quote layer.)
 
 ## Tools (LLM-callable, narrowly scoped)
 

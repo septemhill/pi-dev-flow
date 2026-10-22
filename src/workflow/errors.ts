@@ -13,7 +13,8 @@ export type WorkflowErrorCode =
   | "CONTRACT_ERROR" // pinned template/schema/contract file is missing or uncompilable — fail closed
   | "PERSISTENCE_ERROR" // database or artifact store is unreadable/corrupted
   | "REASON_REQUIRED" // a mandatory argument (e.g. rejection reason) is empty
-  | "DESCRIPTION_REQUIRED"; // /factory init without a description
+  | "DESCRIPTION_REQUIRED" // /factory init without a description
+  | "INVALID_INIT_INPUT"; // /factory init arguments or file inputs are invalid
 
 /** Error with a machine-readable code so commands/tools can give actionable messages. */
 export class WorkflowError extends Error {

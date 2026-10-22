@@ -3,6 +3,7 @@ import { describeError } from "../workflow/errors.ts";
 import { PHASES, PHASE_ARTIFACT_FILE, nextPhase } from "../workflow/phases.ts";
 import { buildPhasePrompt } from "../execution/phase-executor.ts";
 import { formatValidationResult } from "../artifacts/artifact-validator.ts";
+import { parseInitArgs, readAndCombineFiles } from "./init-input.ts";
 import { handleKnowledge } from "./knowledge.ts";
 import type { WorkflowSnapshot, CoverageStageName } from "../workflow/state.ts";
 
@@ -11,6 +12,7 @@ import type { WorkflowSnapshot, CoverageStageName } from "../workflow/state.ts";
  * subcommands, so all sub-actions are parsed from the argument string:
  *
  *   /factory init <description>
+ *   /factory init --file <path> [--file <path> …]
  *   /factory status
  *   /factory run
  *   /factory approve [comment]
@@ -110,11 +112,24 @@ export async function handleFactory(
 
 // ------------------------------------------------------------- sub-actions
 
-function doInit(ctx: CommandCtxLike, deps: FactoryDeps, description: string): void {
+function doInit(ctx: CommandCtxLike, deps: FactoryDeps, raw: string): void {
   const engine = deps.engineFor(ctx.cwd);
+  // Input processing runs entirely BEFORE any workflow state is created:
+  // a missing, unreadable, or empty file must not leave a partial change.
+  const input = parseInitArgs(raw);
+  if (input.files.length === 0 && input.inline.length === 0) {
+    show(ctx, ["No description or files given.", ...usage()]);
+    return;
+  }
+  const description = input.files.length > 0 ? readAndCombineFiles(input.files, ctx.cwd) : input.inline;
   const w = engine.initChange(description);
+  const source =
+    input.files.length > 0
+      ? `Initialized from ${input.files.length} file(s) (order preserved, boundaries marked): ${input.files.join(", ")}`
+      : "Initialized from inline description";
   show(ctx, [
     `Change created: ${w.change_id}`,
+    source,
     `Phase: understanding (1/${PHASES.length})  Status: IDLE`,
     `Artifact: .factory/changes/${w.change_id}/understanding.json (+ generated understanding.md)`,
     "Next: /factory run   (executes the understanding phase)",
@@ -306,6 +321,7 @@ function usage(): string[] {
   return [
     "Factory commands:",
     "  /factory init <description>   create a new change (starts at understanding)",
+    "  /factory init --file <path> [--file <path> …]   create a new change from one or more UTF-8 text files (order preserved; cannot be mixed with inline text)",
     "  /factory status               show phase, status, artifact, approval, tasks",
     "  /factory run                  execute/resume the current phase (never bypasses approvals)",
     "  /factory approve [comment]    approve the pending phase artifact (human gate)",
